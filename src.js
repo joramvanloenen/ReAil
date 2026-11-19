@@ -8,15 +8,9 @@ const viewport = $('scene-viewport');
 const output = $('ai-canvas');
 const outputCtx = output.getContext('2d', { alpha: false });
 const gestureCtx = strokeCanvas.getContext('2d');
-const capture = document.createElement('canvas');
-capture.width = 224; capture.height = 224;
-const captureCtx = capture.getContext('2d', { willReadFrequently: true });
 const remoteCapture = document.createElement('canvas');
 remoteCapture.width = 512; remoteCapture.height = 512;
 const remoteCaptureCtx = remoteCapture.getContext('2d');
-const temp = document.createElement('canvas');
-temp.width = 224; temp.height = 224;
-const tempCtx = temp.getContext('2d');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0f0f0f);
 scene.fog = new THREE.FogExp2(0x0f0f0f, 0.034);
@@ -76,13 +70,7 @@ let cutCount = 0;
 let rotSpeed = .28;
 let rotating = true;
 let mode = 'slice';
-let currentEngine = 'remote';
-let outputSize = 512;
 let maxRate = 10;
-let worker = null;
-let workerReady = false;
-let workerBusy = false;
-let workerVersion = 0;
 let requestAt = 0;
 let hasAIFrame = false;
 let lastDisplay = null;
@@ -94,12 +82,10 @@ let firstInteraction = false;
 let lastAIFrame = 0;
 let aiCount = 0;
 let measuredAiFps = 0;
-let inferMs = null;
 let prevFrame = performance.now();
 let fpsCount = 0;
 let sceneFps = 0;
 let fpsTick = performance.now();
-const white = new THREE.Color();
 
 const tuningIds = [
   'diffusion-strength',
@@ -521,12 +507,10 @@ function drawOutput(source){
   outputCtx.drawImage(source,0,0,512,512);
   lastDisplay=source;
 }
-function setModeLabel(label){$('ai-mode-label').textContent=label;}
 function noteAIFrame(ms) {
   hasAIFrame=true;
   hideOverlay();
   setBadge('ACTIVE','active');
-  inferMs=ms;
   aiCount++;
   const now=performance.now();
   if(lastAIFrame){
@@ -538,7 +522,13 @@ function noteAIFrame(ms) {
   $('ai-latency').textContent=Math.round(ms)+' MS';
 }
 function stopSocket(){
-  if(socket){socket.onclose=null;socket.close();socket=null;}
+  if(socket){
+    socket.onclose=null;
+    socket.close();
+    socket=null;
+  }
+  remotePending=false;
+}
 
 function connectRemote(){
   stopSocket();
