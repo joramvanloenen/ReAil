@@ -9,8 +9,11 @@ const output = $('ai-canvas');
 const outputCtx = output.getContext('2d', { alpha: false });
 const gestureCtx = strokeCanvas.getContext('2d');
 const remoteCapture = document.createElement('canvas');
-remoteCapture.width = 512; remoteCapture.height = 512;
+remoteCapture.width = 384; remoteCapture.height = 384;
 const remoteCaptureCtx = remoteCapture.getContext('2d');
+const probeCanvas = document.createElement('canvas');
+probeCanvas.width = 32; probeCanvas.height = 32;
+const probeCtx = probeCanvas.getContext('2d', {willReadFrequently:true});
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0f0f0f);
 scene.fog = new THREE.FogExp2(0x0f0f0f, 0.034);
@@ -86,6 +89,10 @@ let prevFrame = performance.now();
 let fpsCount = 0;
 let sceneFps = 0;
 let fpsTick = performance.now();
+let lastProbe = null;
+let lastProbeSignature = '';
+let lastSourceSentAt = 0;
+let skippedFrames = 0;
 
 const tuningIds = [
   'diffusion-strength',
@@ -93,7 +100,10 @@ const tuningIds = [
   'temporal-stability',
   'motion-response',
   'diffusion-seed',
-  'lock-seed'
+  'lock-seed',
+  'inference-resolution',
+  'fast-vae',
+  'skip-still'
 ];
 
 function updateTuningLabels() {
@@ -124,6 +134,8 @@ function getRemoteSettings() {
     steps: Number($('diffusion-steps').value),
     temporalStability: Number($('temporal-stability').value) / 100,
     motionResponse: Number($('motion-response').value) / 100,
+    resolution: Number($('inference-resolution').value),
+    fastVae: $('fast-vae').checked,
     seed: Math.max(0, Math.min(2147483647, Math.floor(Number($('diffusion-seed').value) || 0))),
     lockSeed: $('lock-seed').checked
   };
@@ -131,7 +143,10 @@ function getRemoteSettings() {
 
 function saveRemoteTuning() {
   try {
-    localStorage.setItem('reail-diffusion-settings-sdxl-v1', JSON.stringify(getRemoteSettings()));
+    localStorage.setItem('reail-diffusion-settings-sdxl-v1', JSON.stringify({
+      ...getRemoteSettings(),
+      skipStill: $('skip-still').checked
+    }));
   } catch {}
 }
 
@@ -145,7 +160,19 @@ function restoreRemoteTuning() {
     if (Number.isFinite(saved.motionResponse)) $('motion-response').value = String(Math.round(saved.motionResponse * 100));
     if (Number.isFinite(saved.seed)) $('diffusion-seed').value = String(Math.floor(saved.seed));
     if (typeof saved.lockSeed === 'boolean') $('lock-seed').checked = saved.lockSeed;
+    if ([256,384,512].includes(saved.resolution)) $('inference-resolution').value = String(saved.resolution);
+    if (typeof saved.fastVae === 'boolean') $('fast-vae').checked = saved.fastVae;
+    if (typeof saved.skipStill === 'boolean') $('skip-still').checked = saved.skipStill;
   } catch {}
+}
+
+function syncInferenceResolution() {
+  const resolution = Number($('inference-resolution').value);
+  remoteCapture.width = remoteCapture.height = resolution;
+  output.width = output.height = resolution;
+  $('resolution-label').textContent = resolution + '²';
+  // New resolution must not be compared with the old downsampled source.
+  lastProbe = null;
 }
 
 function updateRemoteTelemetry(msg) {
@@ -154,9 +181,12 @@ function updateRemoteTelemetry(msg) {
 
   $('ai-telemetry').hidden = false;
   $('stat-strength').textContent = Number(settings.strength).toFixed(2);
-  $('stat-steps').textContent = String(settings.steps);
-  $('stat-motion').textContent = Number(settings.sceneChange).toFixed(2);
+  $('stat-steps').textContent = String(settings.effectiveSteps ?? settings.steps) + '/' + String(settings.steps);
+  $('stat-motion').textContent = Number(settings.sceneChange ?? 0).toFixed(2);
   $('stat-gpu').textContent = Number(msg.computeMs || 0).toFixed(0) + 'ms';
+  $('stat-server').textContent = Number(msg.serverMs ?? msg.computeMs ?? 0).toFixed(0) + 'ms';
+  $('stat-resolution').textContent = String(settings.resolution || '—');
+  $('stat-skipped').textContent = String(skippedFrames);
 }
 
 function surfaceVertex(theta, t) {
@@ -468,6 +498,7 @@ for (const id of tuningIds) {
   $(id).addEventListener('input', () => {
     if (id === 'diffusion-steps') enforceValidStrengthForSteps();
     else updateTuningLabels();
+    if (id === 'inference-resolution') syncInferenceResolution();
     saveRemoteTuning();
   });
   $(id).addEventListener('change', saveRemoteTuning);
@@ -482,6 +513,7 @@ $('randomize-seed').addEventListener('click', () => {
 
 $('reset-ai-memory').addEventListener('click', () => {
   if (socket?.readyState === WebSocket.OPEN) {
+    lastProbe = null;
     socket.send(JSON.stringify({type:'reset'}));
     setBadge('RESETTING','pending');
   } else {
@@ -503,8 +535,8 @@ function setBadge(label,state=''){
 function drawOutput(source){
   if(!source)return;
   outputCtx.imageSmoothingEnabled=true;
-  outputCtx.clearRect(0,0,512,512);
-  outputCtx.drawImage(source,0,0,512,512);
+  outputCtx.clearRect(0,0,output.width,output.height);
+  outputCtx.drawImage(source,0,0,output.width,output.height);
   lastDisplay=source;
 }
 function noteAIFrame(ms) {
@@ -532,6 +564,9 @@ function stopSocket(){
 
 function connectRemote(){
   stopSocket();
+  lastProbe=null;
+  lastProbeSignature='';
+  skippedFrames=0;
   hasAIFrame=false;
   setBadge('CONNECTING','pending');
 
@@ -594,10 +629,11 @@ function connectRemote(){
       if(msg.type!=='frame'||!msg.image)return;
 
       updateRemoteTelemetry(msg);
+      const sentAt = lastRemoteSent;
       const picture=new Image();
       picture.onload=()=>{
         drawOutput(picture);
-        noteAIFrame(performance.now()-lastRemoteSent);
+        noteAIFrame(performance.now()-sentAt);
       };
       picture.src=msg.image;
     };
@@ -628,26 +664,59 @@ function animate(time) {
 
   if(socket?.readyState===WebSocket.OPEN && !remotePending && time-requestAt>=1000/maxRate){
     requestAt=time;
-    remotePending=true;
-    lastRemoteSent=performance.now();
 
-    try{
-      remoteCaptureCtx.drawImage(sceneCanvas,0,0,512,512);
-      socket.send(JSON.stringify({
-        type:'frame',
-        image:remoteCapture.toDataURL('image/jpeg',.82),
-        prompt:$('prompt').value,
-        frameId:++sequence,
-        settings:getRemoteSettings()
-      }));
-    }catch{
-      remotePending=false;
+    const settings=getRemoteSettings();
+    const signature=$('prompt').value + JSON.stringify(settings);
+    let shouldSend=true;
+
+    // A symmetric grey sphere can render virtually identical frames for
+    // long periods. Avoid re-running SDXL on those frames.
+    if($('skip-still').checked){
+      probeCtx.drawImage(sceneCanvas,0,0,32,32);
+      const sample=probeCtx.getImageData(0,0,32,32).data;
+
+      if(lastProbe && signature===lastProbeSignature && time-lastSourceSentAt<2500){
+        let difference=0;
+        for(let i=0;i<sample.length;i+=4){
+          difference+=Math.abs(sample[i]-lastProbe[i])
+            +Math.abs(sample[i+1]-lastProbe[i+1])
+            +Math.abs(sample[i+2]-lastProbe[i+2]);
+        }
+        shouldSend=(difference/(32*32*3))>=1.0;
+      }
+
+      if(shouldSend) lastProbe=new Uint8ClampedArray(sample);
+    }
+
+    if(!shouldSend){
+      skippedFrames++;
+      $('stat-skipped').textContent=String(skippedFrames);
+    }else{
+      lastProbeSignature=signature;
+      lastSourceSentAt=time;
+      remotePending=true;
+      lastRemoteSent=performance.now();
+
+      try{
+        remoteCaptureCtx.drawImage(sceneCanvas,0,0,remoteCapture.width,remoteCapture.height);
+        socket.send(JSON.stringify({
+          type:'frame',
+          image:remoteCapture.toDataURL('image/jpeg',.80),
+          prompt:$('prompt').value,
+          frameId:++sequence,
+          settings
+        }));
+      }catch(err){
+        remotePending=false;
+        console.error('ReAil frame send failed:',err);
+      }
     }
   }
 }
 
 restoreRemoteTuning();
 enforceValidStrengthForSteps();
+syncInferenceResolution();
 resetSphere();
 resize();
 setBadge('OFFLINE');
