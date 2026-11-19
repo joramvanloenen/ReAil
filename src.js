@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+  makeSphereFaces,
+  makeHeadFaces,
+  initialBlobNodes,
+  makeBlobFaces,
+  makeParticleFaces
+} from './shape-sources.js';
 
 const $ = (id) => document.getElementById(id);
 const sceneCanvas = $('scene-canvas');
@@ -78,6 +85,15 @@ scene.add(ring);
 
 const root = new THREE.Group();
 scene.add(root);
+const blobHandleGroup = new THREE.Group();
+root.add(blobHandleGroup);
+const blobHandleGeometry = new THREE.SphereGeometry(0.086, 14, 10);
+const blobHandleMaterial = new THREE.MeshBasicMaterial({
+  color: 0xbcbcbc, depthTest: false, transparent: true, opacity: 0.82
+});
+const blobHandleSelectedMaterial = new THREE.MeshBasicMaterial({
+  color: 0xf9f9f9, depthTest: false, transparent: true, opacity: 1
+});
 const materials = [
   new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.33, metalness: 0.01, vertexColors: true, side: THREE.DoubleSide }),
   new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, vertexColors: true, side: THREE.DoubleSide })
@@ -127,6 +143,23 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let pieces = [];
 let cutCount = 0;
+let sourceKind = 'sphere';
+let blobNodes = initialBlobNodes();
+let selectedBlobIndex = 0;
+let blobHandleDrag = null;
+let lastBlobRebuildAt = 0;
+let particles = [];
+let particleFaces = null;
+let particleEmitAccumulator = 0;
+const MAX_PARTICLES = 42;
+let lastAutomaticPrompt = $('prompt').value;
+
+const SOURCE_PROMPTS = {
+  sphere: 'Photorealistic smooth matte grey sphere, preserve its exact silhouette and camera angle, studio lighting',
+  head: 'Photorealistic rough grey clay human head sculpture, prominent nose, eyes, brow, mouth and chin, preserve exact orientation, camera and silhouette',
+  blob: 'Photorealistic sculpted neutral grey organic metaball volume with connected lobes, preserve exact silhouette and camera, dramatic studio lighting',
+  particles: 'Photorealistic cluster of individual grey floating spherical particles in zero gravity, preserve all sphere positions, size and spacing, black studio background'
+};
 let rotSpeed = .28;
 let rotating = true;
 let mode = 'slice';
@@ -257,41 +290,6 @@ function updateRemoteTelemetry(msg) {
   $('stat-skipped').textContent = String(skippedFrames);
 }
 
-function surfaceVertex(theta, t) {
-  const phi = t * Math.PI;
-  const radius = 1.04;
-  const sinPhi = Math.sin(phi);
-  const p = new THREE.Vector3(
-    radius * sinPhi * Math.cos(theta),
-    radius * Math.cos(phi),
-    radius * sinPhi * Math.sin(theta)
-  );
-  const n = p.clone().normalize();
-
-  // Neutral grey with only a tiny amount of surface variation so the
-  // diffusion model gets useful shading without reading it as a texture.
-  const micro = 0.012 * Math.sin(theta * 19 + t * 27) * Math.cos(theta * 11 - t * 17);
-  const v = THREE.MathUtils.clamp(0.52 + micro, 0, 1);
-  const c = new THREE.Color().setRGB(v, v, v);
-  return { p, n, c };
-}
-function face(a, b, c, mat) { return { v: [a,b,c], mat }; }
-function buildSphereFaces() {
-  const out = [];
-  const around = 96, rows = 64;
-  for (let y = 0; y < rows; y++) {
-    const t0 = y / rows, t1 = (y + 1) / rows;
-    for (let x = 0; x < around; x++) {
-      const a0 = (x / around) * Math.PI * 2;
-      const a1 = ((x + 1) / around) * Math.PI * 2;
-      const a = surfaceVertex(a0,t0), b = surfaceVertex(a1,t0);
-      const c = surfaceVertex(a1,t1), d = surfaceVertex(a0,t1);
-      if (y !== 0) out.push(face(a,c,b,0));
-      if (y !== rows-1) out.push(face(a,d,c,0));
-    }
-  }
-  return out;
-}
 function makeGeometry(faces) {
   const pos=[], norms=[], colors=[], counts=[0,0];
   for (let mat=0;mat<2;mat++) {
@@ -434,15 +432,200 @@ function addPiece(faces, offset, velocity, dynamic) {
   pieces.push(chunk);
   return chunk;
 }
-function resetSphere() {
-  for(const p of pieces) {root.remove(p.mesh);p.mesh.geometry.dispose();}
-  pieces = []; cutCount = 0;
-  addPiece(buildSphereFaces(),new THREE.Vector3(),new THREE.Vector3(),false);
-  root.rotation.y = .25;
-  $('mesh-count').textContent='01 MESH';
-  $('scene-hint').classList.remove('hidden');
-  firstInteraction=false;
+function clearSourcePieces() {
+  for (const piece of pieces) {
+    root.remove(piece.mesh);
+    piece.mesh.geometry.dispose();
+  }
+  pieces = [];
+  particles = [];
+  particleEmitAccumulator = 0;
 }
+
+function refreshBlobHandles() {
+  blobHandleGroup.clear();
+  if (sourceKind !== 'blob') return;
+  blobNodes.forEach((node, i) => {
+    const handle = new THREE.Mesh(
+      blobHandleGeometry,
+      i === selectedBlobIndex ? blobHandleSelectedMaterial : blobHandleMaterial
+    );
+    handle.position.copy(node.position);
+    handle.userData.blobIndex = i;
+    handle.renderOrder = 10;
+    blobHandleGroup.add(handle);
+  });
+  syncSelectedBlobRadius();
+}
+
+function syncSelectedBlobRadius() {
+  const node = blobNodes[selectedBlobIndex];
+  if (!node) return;
+  $('blob-radius').value = String(Math.round(node.radius * 100));
+  $('blob-radius-label').textContent = node.radius.toFixed(2);
+}
+
+function rebuildBlobMesh() {
+  if (sourceKind !== 'blob') return;
+  for (const piece of pieces) {
+    root.remove(piece.mesh);
+    piece.mesh.geometry.dispose();
+  }
+  pieces = [];
+  const faces = makeBlobFaces(blobNodes);
+  if (faces.length) {
+    addPiece(faces, new THREE.Vector3(), new THREE.Vector3(), false);
+  }
+  $('mesh-count').textContent = String(blobNodes.length).padStart(2, '0') + ' LOBES';
+  pendingProjection = null;
+  lastProbe = null;
+}
+
+function emitParticle(startup = false) {
+  if (particles.length >= MAX_PARTICLES || sourceKind !== 'particles') return;
+  if (!particleFaces) particleFaces = makeParticleFaces();
+  const radius = 0.080 + Math.random() * 0.080;
+  const displacement = new THREE.Vector3(
+    (Math.random() - 0.5) * (startup ? 1.30 : 0.28),
+    (Math.random() - 0.5) * (startup ? 1.05 : 0.28),
+    (Math.random() - 0.5) * (startup ? 0.95 : 0.28)
+  );
+  const velocity = new THREE.Vector3(
+    (Math.random() - 0.5) * 0.25,
+    (Math.random() - 0.5) * 0.25,
+    (Math.random() - 0.5) * 0.25
+  );
+  const chunk = addPiece(particleFaces, displacement, velocity, false);
+  chunk.mesh.scale.setScalar(radius);
+  chunk.mesh.userData.isSliceable = false;
+  chunk.radius = radius;
+  particles.push(chunk);
+  $('mesh-count').textContent = String(particles.length).padStart(2, '0') + ' PARTICLES';
+}
+
+function resetCurrentShape() {
+  resetFeedbackProjection();
+  clearSourcePieces();
+  blobHandleGroup.clear();
+  cutCount = 0;
+  root.rotation.set(0, 0.25, 0);
+  firstInteraction = false;
+  lastProbe = null;
+  particleFaces = null;
+  floor.visible = sourceKind !== 'particles';
+  ring.visible = sourceKind !== 'particles';
+
+  if (sourceKind === 'sphere') {
+    addPiece(makeSphereFaces(), new THREE.Vector3(), new THREE.Vector3(), false);
+  } else if (sourceKind === 'head') {
+    addPiece(makeHeadFaces(), new THREE.Vector3(), new THREE.Vector3(), false);
+  } else if (sourceKind === 'blob') {
+    blobNodes = initialBlobNodes();
+    selectedBlobIndex = 0;
+    rebuildBlobMesh();
+    refreshBlobHandles();
+  } else if (sourceKind === 'particles') {
+    for (let i=0; i<8; i++) emitParticle(true);
+  }
+
+  if (sourceKind !== 'blob' && sourceKind !== 'particles') {
+    $('mesh-count').textContent = '01 MESH';
+  }
+  // Do not show the old shape's generated image as if it belonged to the new source.
+  outputCtx.fillStyle = '#0b0b0b';
+  outputCtx.fillRect(0, 0, output.width, output.height);
+  feedbackTexture.needsUpdate = true;
+  updateSourceHint();
+}
+
+function selectSourceShape(kind) {
+  if (!['sphere', 'head', 'blob', 'particles'].includes(kind)) return;
+  if ($('prompt').value === lastAutomaticPrompt) {
+    $('prompt').value = SOURCE_PROMPTS[kind];
+    lastAutomaticPrompt = SOURCE_PROMPTS[kind];
+  }
+
+  sourceKind = kind;
+  $('source-shape').value = kind;
+  $('blob-tools').hidden = kind !== 'blob';
+  $('particle-tools').hidden = kind !== 'particles';
+  $('tool-edit').hidden = kind !== 'blob';
+  $('tool-slice').hidden = kind === 'particles';
+  resetCurrentShape();
+  setTool(kind === 'blob' ? 'edit' : kind === 'particles' ? 'orbit' : 'slice');
+}
+
+function updateSourceHint() {
+  const hint = $('scene-hint');
+  if (mode === 'orbit') {
+    hint.classList.add('hidden');
+    return;
+  }
+  if (mode === 'edit' && sourceKind === 'blob') {
+    hint.textContent = 'DRAG WHITE HANDLES TO SCULPT';
+  } else {
+    hint.textContent = sourceKind === 'head'
+      ? 'DRAG ACROSS HEAD TO SLICE'
+      : sourceKind === 'blob'
+        ? 'DRAG ACROSS BLOB TO SLICE'
+        : 'DRAG TO SLICE';
+  }
+  hint.classList.remove('hidden');
+}
+
+function updateParticlePhysics(dt) {
+  if (sourceKind !== 'particles') return;
+  const rate = Number($('particle-rate').value) / 100;
+  const attraction = Number($('particle-attraction').value) / 100;
+  const separation = Number($('particle-separation').value) / 100;
+
+  particleEmitAccumulator += dt;
+  if (particleEmitAccumulator >= 1 / Math.max(0.1, rate)) {
+    particleEmitAccumulator -= 1 / Math.max(0.1, rate);
+    emitParticle();
+  }
+
+  // Pairwise equal-and-opposite forces: long-range attraction and
+  // short-range separation, with no world gravity or floor collisions.
+  for (let i=0; i<particles.length; i++) {
+    const a=particles[i];
+    for (let j=i+1; j<particles.length; j++) {
+      const b=particles[j];
+      const delta=b.mesh.position.clone().sub(a.mesh.position);
+      const distance=Math.max(0.0001,delta.length());
+      const dir=delta.divideScalar(distance);
+      const minDistance=(a.radius+b.radius)*1.35;
+      let force=0;
+      if (distance < minDistance) {
+        force = -separation * 2.2 * (minDistance - distance) / minDistance;
+      } else {
+        force = attraction * 0.16 * Math.min(distance - minDistance, 1.4);
+      }
+      a.velocity.addScaledVector(dir, force * dt);
+      b.velocity.addScaledVector(dir, -force * dt);
+    }
+  }
+
+  for (const p of particles) {
+    // Soft confinement to an invisible cloud; no downward acceleration.
+    p.velocity.addScaledVector(p.mesh.position, -0.10 * dt);
+    p.velocity.multiplyScalar(Math.exp(-0.75 * dt));
+    p.velocity.clampLength(0, 0.62);
+    p.mesh.position.addScaledVector(p.velocity, dt);
+
+    // Positional correction keeps the spheres from visibly interpenetrating.
+    for (const other of particles) {
+      if (other === p) continue;
+      const difference=p.mesh.position.clone().sub(other.mesh.position);
+      const distance=difference.length();
+      const clearance=(p.radius+other.radius)*1.02;
+      if (distance < clearance && distance > 0.0001) {
+        p.mesh.position.addScaledVector(difference, (clearance-distance)/(distance*3));
+      }
+    }
+  }
+}
+
 function lerpVertex(a,b,t){
   return {
     p:a.p.clone().lerp(b.p,t),
