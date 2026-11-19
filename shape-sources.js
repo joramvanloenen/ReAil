@@ -36,7 +36,7 @@ export function makeSphereFaces(radius = 1.04, around = 96, rows = 64, color = 0
 }
 
 const gaussian = (value, center, spread) =>
-  Math.exp(-((value - center) / spread) ** 2);
+  Math.exp(-(((value - center) / spread) ** 2));
 
 // A single clay-like, closed triangulated head. Facial structures deform
 // the surface itself rather than attaching decorative objects that cannot
