@@ -238,7 +238,7 @@ function addPiece(faces, offset, velocity, dynamic) {
   mesh.castShadow=true;
   mesh.receiveShadow=true;
   mesh.position.copy(offset);
-  mesh.userData.isFruit=true;
+  mesh.userData.isSliceable=true;
   root.add(mesh);
   const chunk={faces,mesh,velocity:velocity || new THREE.Vector3(),dynamic:!!dynamic,settled:false};
   pieces.push(chunk);
@@ -356,15 +356,7 @@ function slice(normalWorld, pointWorld) {
     cutCount++;
     $('mesh-count').textContent=String(pieces.length).padStart(2,'0')+' FRAGMENTS';
     if(!firstInteraction){firstInteraction=true;$('scene-hint').classList.add('hidden');}
-    if(stem) {
-      const topPiece = pieces.slice().sort((a,b)=>{
-        const ac=a.mesh.geometry.boundingBox.max.y+a.mesh.position.y;
-        const bc=b.mesh.geometry.boundingBox.max.y+b.mesh.position.y;
-        return bc-ac;
-      })[0];
-      if(topPiece)stem.position.copy(topPiece.mesh.position);
-    }
-  }else flashMessage('DRAW A STROKE THROUGH THE FRUIT');
+  }else flashMessage('DRAW A STROKE THROUGH THE SPHERE');
   return sliced>0;
 }
 let noticeTimeout=null;
@@ -396,11 +388,6 @@ function updatePhysics(dt){
       else {piece.velocity.y=0;piece.velocity.x*=.65;piece.velocity.z*=.65;}
       if(piece.velocity.lengthSq()<.001)piece.settled=true;
     }
-  }
-  if(stem&&pieces.length>1){
-    const topPiece=pieces.reduce((best,p)=>
-      !best||p.mesh.geometry.boundingBox.max.y+p.mesh.position.y>best.mesh.geometry.boundingBox.max.y+best.mesh.position.y?p:best,null);
-    if(topPiece)stem.position.lerp(topPiece.mesh.position,Math.min(1,dt*8));
   }
 }
 function resize(){
