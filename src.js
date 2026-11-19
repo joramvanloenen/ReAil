@@ -144,6 +144,7 @@ const pointer = new THREE.Vector2();
 let pieces = [];
 let cutCount = 0;
 let sourceKind = 'sphere';
+let sourceRevision = 0;
 let blobNodes = initialBlobNodes();
 let selectedBlobIndex = 0;
 let blobHandleDrag = null;
@@ -467,6 +468,7 @@ function syncSelectedBlobRadius() {
 
 function rebuildBlobMesh() {
   if (sourceKind !== 'blob') return;
+  sourceRevision++;
   for (const piece of pieces) {
     root.remove(piece.mesh);
     piece.mesh.geometry.dispose();
@@ -504,6 +506,7 @@ function emitParticle(startup = false) {
 }
 
 function resetCurrentShape() {
+  sourceRevision++;
   resetFeedbackProjection();
   clearSourcePieces();
   blobHandleGroup.clear();
@@ -726,6 +729,9 @@ function slice(normalWorld, pointWorld) {
     sliced++;
   }
   if(sliced){
+    sourceRevision++;
+    pendingProjection=null;
+    lastProbe=null;
     cutCount++;
     $('mesh-count').textContent=String(pieces.length).padStart(2,'0')+' FRAGMENTS';
     if(!firstInteraction){firstInteraction=true;$('scene-hint').classList.add('hidden');}
@@ -1105,14 +1111,27 @@ function connectRemote(){
         return;
       }
 
+      const pending = pendingProjection;
+      if (!pending || pending.frameId !== msg.frameId ||
+          pending.revision !== sourceRevision) {
+        // A cut, model switch or blob edit happened while the GPU was busy.
+        // Never apply that older image to today's geometry.
+        pendingProjection=null;
+        remotePending=false;
+        return;
+      }
       updateRemoteTelemetry(msg);
       const sentAt = lastRemoteSent;
-      const projection = pendingProjection?.frameId === msg.frameId
-        ? pendingProjection.snapshot : null;
+      const projection = pending.snapshot;
+      const expectedRevision = pending.revision;
       const connection = socket;
       const picture=new Image();
       picture.onload=()=>{
-        if (socket!==connection) return;
+        if (socket!==connection || sourceRevision!==expectedRevision) {
+          pendingProjection=null;
+          remotePending=false;
+          return;
+        }
         // Finish applying the AI result BEFORE allowing the next request:
         // the next source render must already contain this feedback texture.
         drawOutput(picture);
@@ -1164,7 +1183,7 @@ function animate(time) {
 
     // A symmetric grey sphere can render virtually identical frames for
     // long periods. Avoid re-running SDXL on those frames.
-    if($('skip-still').checked){
+    if($('skip-still').checked && sourceKind !== 'particles' && !blobHandleDrag){
       probeCtx.drawImage(sceneCanvas,0,0,32,32);
       const sample=probeCtx.getImageData(0,0,32,32).data;
 
@@ -1211,7 +1230,7 @@ function animate(time) {
           }
         }
 
-        pendingProjection={frameId,snapshot};
+        pendingProjection={frameId,snapshot,revision:sourceRevision};
         socket.send(JSON.stringify({
           type:'frame',
           image:remoteCapture.toDataURL('image/jpeg',.80),
