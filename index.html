@@ -58,13 +58,42 @@
       </div>
 
       <section class="controls">
+        <div class="control-block source-shape">
+          <label for="source-shape">SOURCE GEOMETRY</label>
+          <select id="source-shape">
+            <option value="sphere">GREY SPHERE</option>
+            <option value="head">ROUGH HUMAN HEAD</option>
+            <option value="blob">EDITABLE METABALL BLOB</option>
+            <option value="particles">ZERO-G PARTICLES</option>
+          </select>
+        </div>
+
         <div class="control-block interaction">
           <label>VIEW</label>
           <div class="button-row">
             <button id="tool-slice" class="button active" type="button">SLICE</button>
+            <button id="tool-edit" class="button" type="button" hidden>EDIT</button>
             <button id="tool-orbit" class="button" type="button">ORBIT</button>
             <button id="reset" class="button" type="button">RESET</button>
           </div>
+        </div>
+
+        <div class="control-block blob-tools" id="blob-tools" hidden>
+          <label for="blob-radius">BLOB LOBE RADIUS <strong id="blob-radius-label">0.67</strong></label>
+          <input id="blob-radius" type="range" min="25" max="100" value="67">
+          <div class="button-row">
+            <button id="blob-add" class="button" type="button">+ LOBE</button>
+            <button id="blob-remove" class="button" type="button">− LOBE</button>
+          </div>
+        </div>
+
+        <div class="control-block particle-tools" id="particle-tools" hidden>
+          <label for="particle-rate">EMIT / SEC <strong id="particle-rate-label">1.0</strong></label>
+          <input id="particle-rate" type="range" min="20" max="300" value="100" step="10">
+          <label for="particle-attraction">ATTRACTION <strong id="particle-attraction-label">0.75</strong></label>
+          <input id="particle-attraction" type="range" min="0" max="200" value="75" step="5">
+          <label for="particle-separation">SEPARATION <strong id="particle-separation-label">1.00</strong></label>
+          <input id="particle-separation" type="range" min="0" max="200" value="100" step="5">
         </div>
 
         <div class="control-block connection">
