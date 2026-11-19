@@ -98,6 +98,79 @@ let sceneFps = 0;
 let fpsTick = performance.now();
 const white = new THREE.Color();
 
+const tuningIds = [
+  'diffusion-strength',
+  'diffusion-steps',
+  'temporal-stability',
+  'motion-response',
+  'diffusion-seed',
+  'lock-seed'
+];
+
+function updateTuningLabels() {
+  const strength = Number($('diffusion-strength').value) / 100;
+  const steps = Number($('diffusion-steps').value);
+  const stability = Number($('temporal-stability').value);
+  const motion = Number($('motion-response').value) / 100;
+
+  $('diffusion-strength-label').textContent = strength.toFixed(2);
+  $('diffusion-steps-label').textContent = String(steps);
+  $('temporal-stability-label').textContent = Math.round(stability) + '%';
+  $('motion-response-label').textContent = motion.toFixed(2) + '×';
+}
+
+function enforceValidStrengthForSteps() {
+  const steps = Math.max(1, Number($('diffusion-steps').value));
+  const minimum = Math.min(1, (1 / steps) + 0.001);
+  const slider = $('diffusion-strength');
+  if ((Number(slider.value) / 100) < minimum) {
+    slider.value = String(Math.ceil(minimum * 100));
+  }
+  updateTuningLabels();
+}
+
+function getRemoteSettings() {
+  return {
+    strength: Number($('diffusion-strength').value) / 100,
+    steps: Number($('diffusion-steps').value),
+    temporalStability: Number($('temporal-stability').value) / 100,
+    motionResponse: Number($('motion-response').value) / 100,
+    seed: Math.max(0, Math.min(2147483647, Math.floor(Number($('diffusion-seed').value) || 0))),
+    lockSeed: $('lock-seed').checked
+  };
+}
+
+function saveRemoteTuning() {
+  try {
+    localStorage.setItem('reail-diffusion-settings', JSON.stringify(getRemoteSettings()));
+  } catch {}
+}
+
+function restoreRemoteTuning() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('reail-diffusion-settings') || 'null');
+    if (!saved) return;
+    if (Number.isFinite(saved.strength)) $('diffusion-strength').value = String(Math.round(saved.strength * 100));
+    if (Number.isFinite(saved.steps)) $('diffusion-steps').value = String(Math.round(saved.steps));
+    if (Number.isFinite(saved.temporalStability)) $('temporal-stability').value = String(Math.round(saved.temporalStability * 100));
+    if (Number.isFinite(saved.motionResponse)) $('motion-response').value = String(Math.round(saved.motionResponse * 100));
+    if (Number.isFinite(saved.seed)) $('diffusion-seed').value = String(Math.floor(saved.seed));
+    if (typeof saved.lockSeed === 'boolean') $('lock-seed').checked = saved.lockSeed;
+  } catch {}
+}
+
+function updateRemoteTelemetry(msg) {
+  const settings = msg.settings;
+  if (!settings) return;
+
+  $('ai-telemetry').hidden = false;
+  $('stat-strength').textContent = Number(settings.strength).toFixed(2);
+  $('stat-steps').textContent = String(settings.steps);
+  $('stat-motion').textContent = Number(settings.sceneChange).toFixed(2);
+  $('stat-seed').textContent = settings.lockSeed ? String(settings.seed) : String(settings.frameSeed);
+  $('stat-gpu').textContent = Number(msg.computeMs || 0).toFixed(0) + 'ms';
+}
+
 function pointAt(theta, t) {
   const sin = Math.max(0, Math.sin(Math.PI * t));
   const lobe = 1 + .045 * Math.cos(theta * 5 + .32) + .028 * Math.sin(theta * 3 + t * 5);
@@ -462,6 +535,31 @@ $('rate').addEventListener('input',e=>{maxRate=Number(e.target.value);$('rate-la
 $('show-raw').addEventListener('change',()=>{hasAIFrame=false;});
 $('style').addEventListener('change',()=>{if(currentEngine==='onnx')startNeural();});
 
+for (const id of tuningIds) {
+  $(id).addEventListener('input', () => {
+    if (id === 'diffusion-steps') enforceValidStrengthForSteps();
+    else updateTuningLabels();
+    saveRemoteTuning();
+  });
+  $(id).addEventListener('change', saveRemoteTuning);
+}
+
+$('randomize-seed').addEventListener('click', () => {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  $('diffusion-seed').value = String(values[0] % 2147483647);
+  saveRemoteTuning();
+});
+
+$('reset-ai-memory').addEventListener('click', () => {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({type:'reset'}));
+    setBadge('RESETTING','pending');
+  } else {
+    flashMessage('CONNECT DIFFUSION FIRST');
+  }
+});
+
 function showOverlay(title,subtitle,error=false){
   $('ai-overlay').hidden=false;
   $('ai-overlay').classList.toggle('error',error);
@@ -569,7 +667,7 @@ function connectRemote(){
   showOverlay('Connecting to diffusion','Requires your own running GPU server.');
   try{
     socket=new WebSocket(address);
-    socket.onopen=()=>{setBadge('CONNECTED');$('overlay-title').textContent='Waiting for diffusion frame';$('overlay-sub').textContent='Sending image-to-image requests...';};
+    socket.onopen=()=>{setBadge('CONNECTED');$('ai-telemetry').hidden=false;$('overlay-title').textContent='Waiting for diffusion frame';$('overlay-sub').textContent='Sending image-to-image requests...';};
     socket.onerror=()=>{setBadge('REMOTE ERROR','error');showOverlay('WebSocket connection failed','Start server.py on your GPU machine; use secure WSS for a public HTTPS site.',true);remotePending=false;};
     socket.onclose=()=>{setBadge('OFFLINE','error');remotePending=false;};
     socket.onmessage=async(event)=>{
@@ -577,7 +675,9 @@ function connectRemote(){
       try{msg=JSON.parse(event.data);}catch{return;}
       remotePending=false;
       if(msg.type==='error'){setBadge('INFERENCE ERROR','error');showOverlay('Diffusion server error',msg.message||'Unknown inference failure',true);return;}
+      if(msg.type==='reset'){setBadge('CONNECTED');$('stat-motion').textContent='—';return;}
       if(msg.type!=='frame'||!msg.image)return;
+      updateRemoteTelemetry(msg);
       const picture=new Image();
       picture.onload=()=>{
         if(currentEngine!=='remote')return;
@@ -592,6 +692,7 @@ $('connect').addEventListener('click',connectRemote);
 $('engine').addEventListener('change',e=>{
   currentEngine=e.target.value;
   $('remote-settings').hidden=currentEngine!=='remote';
+  $('ai-telemetry').hidden=currentEngine!=='remote';
   hasAIFrame=false;inferMs=null;measuredAiFps=0;aiCount=0;lastAIFrame=0;
   $('ai-latency').textContent='LATENCY —';
   if(currentEngine==='onnx')startNeural();
@@ -628,12 +729,20 @@ function animate(time) {
     if(currentEngine==='remote'&&socket?.readyState===WebSocket.OPEN&&!remotePending&&time-requestAt>=1000/maxRate){
       requestAt=time;remotePending=true;lastRemoteSent=performance.now();
       try{
-        socket.send(JSON.stringify({type:'frame',image:capture.toDataURL('image/jpeg',.76),prompt:$('prompt').value,frameId:++sequence}));
+        socket.send(JSON.stringify({
+          type:'frame',
+          image:capture.toDataURL('image/jpeg',.76),
+          prompt:$('prompt').value,
+          frameId:++sequence,
+          settings:getRemoteSettings()
+        }));
       }catch(err){remotePending=false;}
     }
   }
 }
 
+restoreRemoteTuning();
+enforceValidStrengthForSteps();
 resetApple();
 resize();
 setTimeout(startNeural,350);
