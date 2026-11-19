@@ -258,8 +258,10 @@ async def health():
     }
 
 
-@app.websocket("/")
-async def live(socket: WebSocket):
+async def handle_live_socket(socket: WebSocket):
+    client = socket.client
+    origin = socket.headers.get("origin", "unknown")
+    print(f"WebSocket request from {client} origin={origin}")
     await socket.accept()
     print("ReAil client connected.")
 
@@ -339,3 +341,14 @@ async def live(socket: WebSocket):
 
     except WebSocketDisconnect:
         print("ReAil client disconnected.")
+
+
+@app.websocket("/ws")
+async def live_ws(socket: WebSocket):
+    await handle_live_socket(socket)
+
+
+@app.websocket("/")
+async def live_root(socket: WebSocket):
+    # Backward-compatible route for older ReAil frontends.
+    await handle_live_socket(socket)
