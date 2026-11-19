@@ -11,6 +11,9 @@ const gestureCtx = strokeCanvas.getContext('2d');
 const capture = document.createElement('canvas');
 capture.width = 224; capture.height = 224;
 const captureCtx = capture.getContext('2d', { willReadFrequently: true });
+const remoteCapture = document.createElement('canvas');
+remoteCapture.width = 512; remoteCapture.height = 512;
+const remoteCaptureCtx = remoteCapture.getContext('2d');
 const temp = document.createElement('canvas');
 temp.width = 224; temp.height = 224;
 const tempCtx = temp.getContext('2d');
@@ -121,7 +124,7 @@ function updateTuningLabels() {
 
 function enforceValidStrengthForSteps() {
   const steps = Math.max(1, Number($('diffusion-steps').value));
-  const minimum = Math.min(1, (1 / steps) + 0.001);
+  const minimum = Math.min(1, 1 / steps);
   const slider = $('diffusion-strength');
   if ((Number(slider.value) / 100) < minimum) {
     slider.value = String(Math.ceil(minimum * 100));
@@ -142,13 +145,13 @@ function getRemoteSettings() {
 
 function saveRemoteTuning() {
   try {
-    localStorage.setItem('reail-diffusion-settings', JSON.stringify(getRemoteSettings()));
+    localStorage.setItem('reail-diffusion-settings-sdxl-v1', JSON.stringify(getRemoteSettings()));
   } catch {}
 }
 
 function restoreRemoteTuning() {
   try {
-    const saved = JSON.parse(localStorage.getItem('reail-diffusion-settings') || 'null');
+    const saved = JSON.parse(localStorage.getItem('reail-diffusion-settings-sdxl-v1') || 'null');
     if (!saved) return;
     if (Number.isFinite(saved.strength)) $('diffusion-strength').value = String(Math.round(saved.strength * 100));
     if (Number.isFinite(saved.steps)) $('diffusion-steps').value = String(Math.round(saved.steps));
@@ -171,36 +174,28 @@ function updateRemoteTelemetry(msg) {
   $('stat-gpu').textContent = Number(msg.computeMs || 0).toFixed(0) + 'ms';
 }
 
-function pointAt(theta, t) {
-  const sin = Math.max(0, Math.sin(Math.PI * t));
-  const lobe = 1 + .045 * Math.cos(theta * 5 + .32) + .028 * Math.sin(theta * 3 + t * 5);
-  const r = .98 * Math.pow(sin, .67) * (.90 + .20 * t) * lobe;
-  const topDimple = .24 * Math.exp(-Math.pow((1 - t) / .095, 2));
-  const bottomDimple = .11 * Math.exp(-Math.pow(t / .07, 2));
-  const y = (2 * t - 1) * 1.08 - topDimple + bottomDimple
-    - .035 * Math.cos(theta * 5 + .3) * Math.exp(-Math.pow((1 - t) / .13, 2));
-  return new THREE.Vector3(r * Math.cos(theta), y, r * Math.sin(theta));
-}
 function surfaceVertex(theta, t) {
-  const p = pointAt(theta, t);
-  const eps = 0.0002;
-  const dt = pointAt(theta, Math.min(.9999, t + eps)).sub(pointAt(theta, Math.max(.0001, t - eps)));
-  const da = pointAt(theta + eps, t).sub(pointAt(theta - eps, t));
-  const n = dt.cross(da).normalize();
-  const sun = Math.max(0, Math.cos(theta - 2.4));
-  const freckles = Math.sin(theta * 75 + t * 175) * Math.cos(theta * 47 - t * 133);
-  const gold = .035 + .21 * Math.pow(Math.abs(t - .75), 3) + .29 * Math.pow(Math.max(0, t - .78), 2);
-  const c = new THREE.Color().setRGB(
-    Math.min(1, .61 + .20 * sun + gold + freckles * .016),
-    Math.min(1, .073 + .07 * sun + gold * 1.1 + freckles * .012),
-    Math.min(1, .041 + .025 * sun + gold * .36 + freckles * .007)
+  const phi = t * Math.PI;
+  const radius = 1.04;
+  const sinPhi = Math.sin(phi);
+  const p = new THREE.Vector3(
+    radius * sinPhi * Math.cos(theta),
+    radius * Math.cos(phi),
+    radius * sinPhi * Math.sin(theta)
   );
+  const n = p.clone().normalize();
+
+  // Neutral grey with only a tiny amount of surface variation so the
+  // diffusion model gets useful shading without reading it as a texture.
+  const micro = 0.012 * Math.sin(theta * 19 + t * 27) * Math.cos(theta * 11 - t * 17);
+  const v = THREE.MathUtils.clamp(0.52 + micro, 0, 1);
+  const c = new THREE.Color().setRGB(v, v, v);
   return { p, n, c };
 }
 function face(a, b, c, mat) { return { v: [a,b,c], mat }; }
-function buildAppleFaces() {
+function buildSphereFaces() {
   const out = [];
-  const around = 88, rows = 55;
+  const around = 96, rows = 64;
   for (let y = 0; y < rows; y++) {
     const t0 = y / rows, t1 = (y + 1) / rows;
     for (let x = 0; x < around; x++) {
@@ -249,37 +244,10 @@ function addPiece(faces, offset, velocity, dynamic) {
   pieces.push(chunk);
   return chunk;
 }
-let stem = null;
-function addStem() {
-  stem = new THREE.Group();
-  const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0,.82,0),
-    new THREE.Vector3(.016,.99,-.009),
-    new THREE.Vector3(.072,1.16,-.035),
-    new THREE.Vector3(.11,1.28,-.046)
-  ]);
-  const twig = new THREE.Mesh(new THREE.TubeGeometry(curve,12,.043,8,false),
-    new THREE.MeshStandardMaterial({color:0x634727,roughness:1}));
-  twig.castShadow=true;
-  stem.add(twig);
-  const leafShape = new THREE.Shape();
-  leafShape.moveTo(0,0);
-  leafShape.bezierCurveTo(.3,.13,.53,.37,.69,.62);
-  leafShape.bezierCurveTo(.2,.66,-.04,.31,0,0);
-  const leaf = new THREE.Mesh(new THREE.ShapeGeometry(leafShape,20),
-    new THREE.MeshStandardMaterial({color:0x56873b,side:THREE.DoubleSide,roughness:.9}));
-  leaf.position.set(.08,1.13,-.05);
-  leaf.rotation.x = -.52; leaf.rotation.y = -.4; leaf.rotation.z = -.15;
-  leaf.castShadow=true;
-  stem.add(leaf);
-  root.add(stem);
-}
-function resetApple() {
+function resetSphere() {
   for(const p of pieces) {root.remove(p.mesh);p.mesh.geometry.dispose();}
   pieces = []; cutCount = 0;
-  if(stem) root.remove(stem);
-  addPiece(buildAppleFaces(),new THREE.Vector3(),new THREE.Vector3(),false);
-  addStem();
+  addPiece(buildSphereFaces(),new THREE.Vector3(),new THREE.Vector3(),false);
   root.rotation.y = .25;
   $('mesh-count').textContent='01 MESH';
   $('scene-hint').classList.remove('hidden');
@@ -310,15 +278,10 @@ function clipPoly(poly, n, d, keepPositive) {
 function triangulate(poly,mat,out){
   for(let i=1;i<poly.length-1;i++)out.push(face(poly[0],poly[i],poly[i+1],mat));
 }
-function fleshColor(p) {
-  const radial=Math.hypot(p.x,p.z);
-  const core = THREE.MathUtils.smoothstep(radial,.085,.32);
-  const striation=.025*Math.sin(p.x*19+p.y*33)*Math.sin(p.z*27-p.y*21);
-  return new THREE.Color().setRGB(
-    .66+.32*core+striation,
-    .38+.48*core+striation,
-    .21+.58*core+striation
-  );
+function cutSurfaceColor(p) {
+  const micro = 0.01 * Math.sin(p.x * 15 + p.y * 13) * Math.cos(p.z * 17 - p.y * 9);
+  const v = THREE.MathUtils.clamp(0.68 + micro, 0, 1);
+  return new THREE.Color().setRGB(v, v, v);
 }
 function splitFaces(faces,n,d) {
   const positive=[],negative=[],edge=[];
@@ -350,11 +313,11 @@ function splitFaces(faces,n,d) {
     Math.atan2(b.clone().sub(center).dot(v),b.clone().sub(center).dot(u))
   );
   function addCap(target,normal,flip){
-    const c={p:center.clone(),n:normal.clone(),c:fleshColor(center)};
+    const c={p:center.clone(),n:normal.clone(),c:cutSurfaceColor(center)};
     for(let i=0;i<unique.length;i++){
       const a=unique[i], b=unique[(i+1)%unique.length];
-      const av={p:a.clone(),n:normal.clone(),c:fleshColor(a)};
-      const bv={p:b.clone(),n:normal.clone(),c:fleshColor(b)};
+      const av={p:a.clone(),n:normal.clone(),c:cutSurfaceColor(a)};
+      const bv={p:b.clone(),n:normal.clone(),c:cutSurfaceColor(b)};
       target.push(flip?face(c,bv,av,1):face(c,av,bv,1));
     }
   }
@@ -410,7 +373,7 @@ function flashMessage(text){
   hint.textContent=text;
   hint.classList.remove('hidden');
   clearTimeout(noticeTimeout);
-  noticeTimeout=setTimeout(()=>{hint.classList.add('hidden');hint.innerHTML='<span class="crosshair">✳</span> DRAG ACROSS APPLE TO SLICE';},1600);
+  noticeTimeout=setTimeout(()=>{hint.classList.add('hidden');hint.innerHTML='<span class="crosshair">✳</span> DRAG ACROSS SPHERE TO SLICE';},1600);
 }
 function autoSlice(){
   const angle=cutCount*Math.PI*.27;
@@ -514,12 +477,12 @@ function setTool(which){
     $('tool-'+t).setAttribute('aria-pressed',String(t===which));
   }
   $('scene-hint').classList.toggle('hidden',which==='orbit');
-  if(which==='slice')$('scene-hint').innerHTML='<span class="crosshair">✳</span> DRAG ACROSS APPLE TO SLICE';
+  if(which==='slice')$('scene-hint').innerHTML='<span class="crosshair">✳</span> DRAG ACROSS SPHERE TO SLICE';
 }
 $('tool-slice').addEventListener('click',()=>setTool('slice'));
 $('tool-orbit').addEventListener('click',()=>setTool('orbit'));
 $('slice-once').addEventListener('click',autoSlice);
-$('reset').addEventListener('click',resetApple);
+$('reset').addEventListener('click',resetSphere);
 $('rotation').addEventListener('input',e=>{rotSpeed=Number(e.target.value)/100;$('rotation-label').textContent=rotSpeed.toFixed(2)+' RAD/S';});
 $('auto-rotate').addEventListener('change',e=>rotating=e.target.checked);
 $('pixelated').addEventListener('change',e=>output.classList.toggle('smooth',!e.target.checked));
@@ -661,8 +624,8 @@ function connectRemote(){
   currentEngine='remote';hasAIFrame=false;
   setBadge('CONNECTING','pending');
   setModeLabel('DIFFUSION / EXTERNAL GPU');
-  $('model-corner').textContent='NN_02 · SD-TURBO';
-  $('truth').textContent='Real generative diffusion requires your own running GPU server. Frames are sent from this browser to the server over WebSocket.';
+  $('model-corner').textContent='NN_02 · SDXL-TURBO';
+  $('truth').textContent='SDXL-Turbo runs on your external GPU server. ReAil sends a 512 × 512 Three.js frame over WebSocket for each img2img request.';
 
   let address=$('socket-url').value.trim();
   if(!address) address='ws://127.0.0.1:8765/ws';
@@ -738,7 +701,7 @@ $('engine').addEventListener('change',e=>{
   hasAIFrame=false;inferMs=null;measuredAiFps=0;aiCount=0;lastAIFrame=0;
   $('ai-latency').textContent='LATENCY —';
   if(currentEngine==='onnx')startNeural();
-  else if(currentEngine==='remote'){stopWorker();setBadge('NOT CONNECTED','pending');setModeLabel('DIFFUSION / EXTERNAL GPU');showOverlay('Remote mode selected','Enter a WebSocket URL and press CONNECT.');$('truth').textContent='Remote diffusion is not hosted by GitHub Pages. Connect a separate GPU inference service.';}
+  else if(currentEngine==='remote'){stopWorker();setBadge('NOT CONNECTED','pending');setModeLabel('SDXL-TURBO / EXTERNAL GPU');$('model-corner').textContent='NN_02 · SDXL-TURBO';showOverlay('Remote mode selected','Enter a WebSocket URL and press CONNECT.');$('truth').textContent='SDXL-Turbo img2img runs on your GPU server at 512 × 512. Live controls are applied on the next generated frame.';}
   else{stopWorker();stopSocket();hideOverlay();setBadge('NOT AI','pending');setModeLabel('PREVIEW / NO INFERENCE');$('model-corner').textContent='RDR_02 · RAW';$('ai-latency').textContent='LATENCY N/A';$('truth').textContent='Raw downsampled Three.js image. This preview is deliberately NOT described as AI.';}
 });
 
@@ -773,7 +736,7 @@ function animate(time) {
       try{
         socket.send(JSON.stringify({
           type:'frame',
-          image:capture.toDataURL('image/jpeg',.76),
+          image:(remoteCaptureCtx.drawImage(sceneCanvas,0,0,512,512),remoteCapture.toDataURL('image/jpeg',.82)),
           prompt:$('prompt').value,
           frameId:++sequence,
           settings:getRemoteSettings()
@@ -785,7 +748,7 @@ function animate(time) {
 
 restoreRemoteTuning();
 enforceValidStrengthForSteps();
-resetApple();
+resetSphere();
 resize();
 setTimeout(startNeural,350);
 requestAnimationFrame(animate);
