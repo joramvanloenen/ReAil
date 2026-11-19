@@ -18,8 +18,8 @@ const temp = document.createElement('canvas');
 temp.width = 224; temp.height = 224;
 const tempCtx = temp.getContext('2d');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1b251e);
-scene.fog = new THREE.FogExp2(0x1b251e, 0.034);
+scene.background = new THREE.Color(0x0f0f0f);
+scene.fog = new THREE.FogExp2(0x0f0f0f, 0.034);
 const renderer = new THREE.WebGLRenderer({ canvas: sceneCanvas, antialias: true, powerPreference: 'high-performance', alpha: false });
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -34,8 +34,8 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance = 3.1; controls.maxDistance = 11;
 controls.enabled = false;
-scene.add(new THREE.HemisphereLight(0xdbe6d3, 0x4b3528, 2.15));
-const key = new THREE.DirectionalLight(0xffead5, 3.2);
+scene.add(new THREE.HemisphereLight(0xd8d8d8, 0x242424, 2.0));
+const key = new THREE.DirectionalLight(0xffffff, 3.0);
 key.position.set(-3.5, 6.5, 4.7);
 key.castShadow = true;
 key.shadow.mapSize.set(1024, 1024);
@@ -43,13 +43,13 @@ key.shadow.camera.left = -5; key.shadow.camera.right = 5;
 key.shadow.camera.top = 5; key.shadow.camera.bottom = -5;
 key.shadow.bias = -0.0005;
 scene.add(key);
-const rim = new THREE.DirectionalLight(0xdbeea8, 2.4);
+const rim = new THREE.DirectionalLight(0xb8b8b8, 2.2);
 rim.position.set(3, 2.8, -4);
 scene.add(rim);
 
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(4.1, 96),
-  new THREE.MeshStandardMaterial({ color: 0x313f30, roughness: 0.85, metalness: 0 })
+  new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0 })
 );
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = -1.62;
@@ -57,7 +57,7 @@ floor.receiveShadow = true;
 scene.add(floor);
 const ring = new THREE.Mesh(
   new THREE.RingGeometry(3.7, 3.715, 120),
-  new THREE.MeshBasicMaterial({ color: 0x7a9167, side: THREE.DoubleSide, transparent: true, opacity: 0.23 })
+  new THREE.MeshBasicMaterial({ color: 0x555555, side: THREE.DoubleSide, transparent: true, opacity: 0.18 })
 );
 ring.rotation.x = -Math.PI / 2;
 ring.position.y = -1.617;
@@ -76,9 +76,9 @@ let cutCount = 0;
 let rotSpeed = .28;
 let rotating = true;
 let mode = 'slice';
-let currentEngine = 'onnx';
-let outputSize = 96;
-let maxRate = 15;
+let currentEngine = 'remote';
+let outputSize = 512;
+let maxRate = 10;
 let worker = null;
 let workerReady = false;
 let workerBusy = false;
@@ -170,7 +170,6 @@ function updateRemoteTelemetry(msg) {
   $('stat-strength').textContent = Number(settings.strength).toFixed(2);
   $('stat-steps').textContent = String(settings.steps);
   $('stat-motion').textContent = Number(settings.sceneChange).toFixed(2);
-  $('stat-seed').textContent = settings.lockSeed ? String(settings.seed) : String(settings.frameSeed);
   $('stat-gpu').textContent = Number(msg.computeMs || 0).toFixed(0) + 'ms';
 }
 
@@ -412,7 +411,7 @@ function strokeStartEnd(start,end){
   const r=sceneCanvas.getBoundingClientRect();
   gestureCtx.clearRect(0,0,r.width,r.height);
   if(!start||!end)return;
-  gestureCtx.strokeStyle='#d9f887';
+  gestureCtx.strokeStyle='#d0d0d0';
   gestureCtx.lineWidth=2.1;
   gestureCtx.setLineDash([10,6]);
   gestureCtx.beginPath();
@@ -420,7 +419,7 @@ function strokeStartEnd(start,end){
   gestureCtx.lineTo(end.x-r.left,end.y-r.top);
   gestureCtx.stroke();
   gestureCtx.setLineDash([]);
-  gestureCtx.fillStyle='#e5ffa1';
+  gestureCtx.fillStyle='#e5e5e5';
   for(const p of [start,end]){
     gestureCtx.beginPath();gestureCtx.arc(p.x-r.left,p.y-r.top,3,0,Math.PI*2);gestureCtx.fill();
   }
@@ -468,22 +467,16 @@ function setTool(which){
 }
 $('tool-slice').addEventListener('click',()=>setTool('slice'));
 $('tool-orbit').addEventListener('click',()=>setTool('orbit'));
-$('slice-once').addEventListener('click',autoSlice);
 $('reset').addEventListener('click',resetSphere);
-$('rotation').addEventListener('input',e=>{rotSpeed=Number(e.target.value)/100;$('rotation-label').textContent=rotSpeed.toFixed(2)+' RAD/S';});
-$('auto-rotate').addEventListener('change',e=>rotating=e.target.checked);
-$('pixelated').addEventListener('change',e=>output.classList.toggle('smooth',!e.target.checked));
-$('resolution').addEventListener('input',e=>{
-  const values=[64,96,128,224];
-  outputSize=values[Number(e.target.value)];
-  $('resolution-label').textContent=outputSize+' × '+outputSize;
-  $('output-resolution').textContent=outputSize+' × '+outputSize+' OUTPUT';
-  output.width=outputSize;output.height=outputSize;
-  if(lastDisplay) drawOutput(lastDisplay);
+$('rotation').addEventListener('input',e=>{
+  rotSpeed=Number(e.target.value)/100;
+  $('rotation-label').textContent=rotSpeed.toFixed(2);
 });
-$('rate').addEventListener('input',e=>{maxRate=Number(e.target.value);$('rate-label').textContent=maxRate+' FPS';});
-$('show-raw').addEventListener('change',()=>{hasAIFrame=false;});
-$('style').addEventListener('change',()=>{if(currentEngine==='onnx')startNeural();});
+$('auto-rotate').addEventListener('change',e=>rotating=e.target.checked);
+$('rate').addEventListener('input',e=>{
+  maxRate=Number(e.target.value);
+  $('rate-label').textContent=maxRate+' FPS';
+});
 
 for (const id of tuningIds) {
   $(id).addEventListener('input', () => {
@@ -519,19 +512,20 @@ function showOverlay(title,subtitle,error=false){
 function hideOverlay(){$('ai-overlay').hidden=true;}
 function setBadge(label,state=''){
   $('ai-badge').textContent=label;
-  $('ai-badge').className='pill '+state;
+  $('ai-badge').className='status '+state;
 }
 function drawOutput(source){
   if(!source)return;
   outputCtx.imageSmoothingEnabled=true;
-  outputCtx.drawImage(source,0,0,outputSize,outputSize);
+  outputCtx.clearRect(0,0,512,512);
+  outputCtx.drawImage(source,0,0,512,512);
   lastDisplay=source;
 }
 function setModeLabel(label){$('ai-mode-label').textContent=label;}
 function noteAIFrame(ms) {
   hasAIFrame=true;
   hideOverlay();
-  setBadge('AI ACTIVE');
+  setBadge('ACTIVE','active');
   inferMs=ms;
   aiCount++;
   const now=performance.now();
@@ -540,86 +534,23 @@ function noteAIFrame(ms) {
     measuredAiFps=measuredAiFps ? measuredAiFps*.78+(1000/diff)*.22 : 1000/diff;
   }
   lastAIFrame=now;
-  $('ai-fps').textContent=(measuredAiFps||0).toFixed(1)+' AI FPS';
-  $('ai-latency').textContent='LATENCY '+Math.round(ms)+' MS';
-}
-function getSourceFrame(){
-  captureCtx.drawImage(sceneCanvas,0,0,224,224);
-}
-function rawPreview(){
-  drawOutput(capture);
-  if(currentEngine==='preview'||$('show-raw').checked){
-    $('ai-fps').textContent=sceneFps+' RENDER FPS';
-  }
-}
-function stopWorker(){
-  workerVersion++;
-  if(worker){worker.terminate();worker=null;}
-  workerReady=false;workerBusy=false;
+  $('ai-fps').textContent=(measuredAiFps||0).toFixed(1)+' FPS';
+  $('ai-latency').textContent=Math.round(ms)+' MS';
 }
 function stopSocket(){
   if(socket){socket.onclose=null;socket.close();socket=null;}
-  remotePending=false;
-}
-function startNeural(){
-  stopSocket();stopWorker();
-  currentEngine='onnx';
-  hasAIFrame=false;
-  setBadge('LOADING','pending');
-  $('model-corner').textContent='NN_01 · ONNX STYLE';
-  setModeLabel('NEURAL / ON-DEVICE');
-  $('truth').textContent='Real feed-forward ONNX neural style transfer at 224 × 224. Display resolution does not change inference cost or promise 30 FPS.';
-  showOverlay('Loading the neural model','Downloading approximately 6.7 MB. First load can take a moment.');
-  const myVersion=workerVersion;
-  try {worker=new Worker('./inference-worker.js');}
-  catch(err){showOverlay('Worker unavailable',String(err),true);setBadge('AI ERROR','error');return;}
-  worker.onmessage=(event)=>{
-    if(myVersion!==workerVersion)return;
-    const msg=event.data;
-    if(msg.type==='ready'){
-      workerReady=true;
-      setBadge('READY');
-      $('overlay-title').textContent='Neural model ready';
-      $('overlay-sub').textContent='Generating first interpreted frame...';
-    }else if(msg.type==='loading'){
-      $('overlay-sub').textContent=msg.message;
-    }else if(msg.type==='frame'){
-      workerBusy=false;
-      const data=new ImageData(new Uint8ClampedArray(msg.pixels),224,224);
-      tempCtx.putImageData(data,0,0);
-      if(!$('show-raw').checked){
-        drawOutput(temp);
-        noteAIFrame(performance.now()-msg.sent);
-      }
-    }else if(msg.type==='error'){
-      workerBusy=false;workerReady=false;
-      setBadge('AI UNAVAILABLE','error');
-      showOverlay('Could not load neural AI',msg.message+' — preview remains available.',true);
-      $('truth').textContent='The neural model failed to load. The visible image is now a raw downsampled preview, NOT AI.';
-    }
-  };
-  worker.onerror=(e)=>{
-    if(myVersion!==workerVersion)return;
-    workerBusy=false;workerReady=false;
-    setBadge('AI ERROR','error');
-    showOverlay('Neural runtime error',e.message||'Unable to start ONNX Runtime',true);
-  };
-  worker.postMessage({type:'init',style:$('style').value});
-}
+
 function connectRemote(){
-  stopWorker();stopSocket();
-  currentEngine='remote';hasAIFrame=false;
+  stopSocket();
+  hasAIFrame=false;
   setBadge('CONNECTING','pending');
-  setModeLabel('DIFFUSION / EXTERNAL GPU');
-  $('model-corner').textContent='NN_02 · SDXL-TURBO';
-  $('truth').textContent='SDXL-Turbo runs on your external GPU server. ReAil sends a 512 × 512 Three.js frame over WebSocket for each img2img request.';
 
   let address=$('socket-url').value.trim();
   if(!address) address='ws://127.0.0.1:8765/ws';
   if(/^ws:\/\/127\.0\.0\.1:8765\/?$/.test(address)) address='ws://127.0.0.1:8765/ws';
   $('socket-url').value=address;
 
-  showOverlay('Connecting to diffusion',address);
+  showOverlay('CONNECTING',address);
 
   try{
     socket=new WebSocket(address);
@@ -627,108 +558,100 @@ function connectRemote(){
     const connectTimeout=setTimeout(()=>{
       if(socket && socket.readyState===WebSocket.CONNECTING){
         try{socket.close();}catch{}
-        setBadge('REMOTE ERROR','error');
-        showOverlay('WebSocket timed out','HTTP health works, but the WebSocket handshake did not complete. Check the Uvicorn terminal for a WebSocket request.',true);
+        setBadge('OFFLINE','error');
+        showOverlay('CONNECTION FAILED','No WebSocket response from '+address,true);
       }
     },5000);
 
     socket.onopen=()=>{
       clearTimeout(connectTimeout);
-      setBadge('CONNECTED');
+      setBadge('CONNECTED','connected');
       $('ai-telemetry').hidden=false;
-      $('overlay-title').textContent='Waiting for diffusion frame';
-      $('overlay-sub').textContent='Connected to '+address+' — sending image-to-image requests...';
-      console.info('[ReAil] WebSocket connected:', address);
+      $('overlay-title').textContent='WAITING FOR FRAME';
+      $('overlay-sub').textContent='';
     };
 
-    socket.onerror=(event)=>{
+    socket.onerror=()=>{
       clearTimeout(connectTimeout);
-      console.error('[ReAil] WebSocket error:', address, event);
-      setBadge('REMOTE ERROR','error');
-      showOverlay('WebSocket connection failed','Could not open '+address+'. The health endpoint can work even when WebSocket support is missing; install requirements and restart Uvicorn.',true);
+      setBadge('OFFLINE','error');
+      showOverlay('CONNECTION FAILED',address,true);
       remotePending=false;
     };
 
-    socket.onclose=(event)=>{
+    socket.onclose=()=>{
       clearTimeout(connectTimeout);
-      console.warn('[ReAil] WebSocket closed:', event.code, event.reason);
-      if(currentEngine==='remote'){
-        setBadge('OFFLINE','error');
-      }
+      setBadge('OFFLINE','error');
       remotePending=false;
     };
 
-    socket.onmessage=async(event)=>{
+    socket.onmessage=(event)=>{
       let msg;
       try{msg=JSON.parse(event.data);}catch{return;}
       remotePending=false;
-      if(msg.type==='error'){setBadge('INFERENCE ERROR','error');showOverlay('Diffusion server error',msg.message||'Unknown inference failure',true);return;}
-      if(msg.type==='reset'){setBadge('CONNECTED');$('stat-motion').textContent='—';return;}
+
+      if(msg.type==='error'){
+        setBadge('ERROR','error');
+        showOverlay('DIFFUSION ERROR',msg.message||'Unknown server error',true);
+        return;
+      }
+
+      if(msg.type==='reset'){
+        setBadge('CONNECTED','connected');
+        $('stat-motion').textContent='—';
+        return;
+      }
+
       if(msg.type!=='frame'||!msg.image)return;
+
       updateRemoteTelemetry(msg);
       const picture=new Image();
       picture.onload=()=>{
-        if(currentEngine!=='remote')return;
         drawOutput(picture);
         noteAIFrame(performance.now()-lastRemoteSent);
       };
       picture.src=msg.image;
     };
   }catch(err){
-    console.error('[ReAil] Could not construct WebSocket:',err);
-    setBadge('REMOTE ERROR','error');
-    showOverlay('Could not open WebSocket',String(err),true);
+    setBadge('OFFLINE','error');
+    showOverlay('CONNECTION FAILED',String(err),true);
   }
 }
 $('connect').addEventListener('click',connectRemote);
-$('engine').addEventListener('change',e=>{
-  currentEngine=e.target.value;
-  $('remote-settings').hidden=currentEngine!=='remote';
-  $('ai-telemetry').hidden=currentEngine!=='remote';
-  hasAIFrame=false;inferMs=null;measuredAiFps=0;aiCount=0;lastAIFrame=0;
-  $('ai-latency').textContent='LATENCY —';
-  if(currentEngine==='onnx')startNeural();
-  else if(currentEngine==='remote'){stopWorker();setBadge('NOT CONNECTED','pending');setModeLabel('SDXL-TURBO / EXTERNAL GPU');$('model-corner').textContent='NN_02 · SDXL-TURBO';showOverlay('Remote mode selected','Enter a WebSocket URL and press CONNECT.');$('truth').textContent='SDXL-Turbo img2img runs on your GPU server at 512 × 512. Live controls are applied on the next generated frame.';}
-  else{stopWorker();stopSocket();hideOverlay();setBadge('NOT AI','pending');setModeLabel('PREVIEW / NO INFERENCE');$('model-corner').textContent='RDR_02 · RAW';$('ai-latency').textContent='LATENCY N/A';$('truth').textContent='Raw downsampled Three.js image. This preview is deliberately NOT described as AI.';}
-});
-
 function animate(time) {
   requestAnimationFrame(animate);
+
   const dt=Math.min(.05,(time-prevFrame)/1000||.016);
   prevFrame=time;
+
   if(rotating)root.rotation.y+=dt*rotSpeed;
   updatePhysics(dt);
   controls.update();
   renderer.render(scene,camera);
+
   fpsCount++;
   if(time-fpsTick>=1000){
     sceneFps=Math.round(fpsCount*1000/(time-fpsTick));
-    fpsCount=0;fpsTick=time;
+    fpsCount=0;
+    fpsTick=time;
     $('scene-fps').textContent=sceneFps+' FPS';
   }
-  const needsSource=currentEngine==='preview'||$('show-raw').checked||(currentEngine==='onnx'&&workerReady&&!workerBusy&&time-requestAt>=1000/maxRate)||(currentEngine==='remote'&&socket?.readyState===WebSocket.OPEN&&!remotePending&&time-requestAt>=1000/maxRate)||!hasAIFrame;
-  if(needsSource){
-    getSourceFrame();
-    if(currentEngine==='preview'||$('show-raw').checked||(!hasAIFrame&&!workerReady&&!remotePending)){
-      rawPreview();
-    }
-    if(currentEngine==='onnx'&&workerReady&&!workerBusy&&time-requestAt>=1000/maxRate){
-      const pixels=captureCtx.getImageData(0,0,224,224).data;
-      workerBusy=true;requestAt=time;
-      try{worker.postMessage({type:'frame',pixels:pixels.buffer,sent:performance.now()},[pixels.buffer]);}
-      catch{workerBusy=false;}
-    }
-    if(currentEngine==='remote'&&socket?.readyState===WebSocket.OPEN&&!remotePending&&time-requestAt>=1000/maxRate){
-      requestAt=time;remotePending=true;lastRemoteSent=performance.now();
-      try{
-        socket.send(JSON.stringify({
-          type:'frame',
-          image:(remoteCaptureCtx.drawImage(sceneCanvas,0,0,512,512),remoteCapture.toDataURL('image/jpeg',.82)),
-          prompt:$('prompt').value,
-          frameId:++sequence,
-          settings:getRemoteSettings()
-        }));
-      }catch(err){remotePending=false;}
+
+  if(socket?.readyState===WebSocket.OPEN && !remotePending && time-requestAt>=1000/maxRate){
+    requestAt=time;
+    remotePending=true;
+    lastRemoteSent=performance.now();
+
+    try{
+      remoteCaptureCtx.drawImage(sceneCanvas,0,0,512,512);
+      socket.send(JSON.stringify({
+        type:'frame',
+        image:remoteCapture.toDataURL('image/jpeg',.82),
+        prompt:$('prompt').value,
+        frameId:++sequence,
+        settings:getRemoteSettings()
+      }));
+    }catch{
+      remotePending=false;
     }
   }
 }
@@ -737,5 +660,6 @@ restoreRemoteTuning();
 enforceValidStrengthForSteps();
 resetSphere();
 resize();
-setTimeout(startNeural,350);
+setBadge('OFFLINE');
+setTimeout(connectRemote,250);
 requestAnimationFrame(animate);
