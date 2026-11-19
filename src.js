@@ -8,6 +8,22 @@ const viewport = $('scene-viewport');
 const output = $('ai-canvas');
 const outputCtx = output.getContext('2d', { alpha: false });
 const gestureCtx = strokeCanvas.getContext('2d');
+
+// The AI image is also a GPU texture. The UVs are projected from the exact
+// camera pose used for the source frame and then remain attached to each mesh.
+const feedbackTexture = new THREE.CanvasTexture(output);
+feedbackTexture.colorSpace = THREE.SRGBColorSpace;
+feedbackTexture.wrapS = THREE.ClampToEdgeWrapping;
+feedbackTexture.wrapT = THREE.ClampToEdgeWrapping;
+feedbackTexture.minFilter = THREE.LinearFilter;
+feedbackTexture.magFilter = THREE.LinearFilter;
+feedbackTexture.generateMipmaps = false;
+const feedbackUniforms = {
+  aiFeedbackTexture: {value: feedbackTexture},
+  aiFeedbackStrength: {value: 0}
+};
+let feedbackReady = false;
+let pendingProjection = null;
 const remoteCapture = document.createElement('canvas');
 remoteCapture.width = 384; remoteCapture.height = 384;
 const remoteCaptureCtx = remoteCapture.getContext('2d');
@@ -66,6 +82,47 @@ const materials = [
   new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.33, metalness: 0.01, vertexColors: true, side: THREE.DoubleSide }),
   new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, vertexColors: true, side: THREE.DoubleSide })
 ];
+
+// Modify only the sphere/fragment materials. Lighting and vertex colors stay
+// intact; generated AI RGB is mixed into the final shaded output. Custom
+// vertex attributes keep per-fragment projected UVs and front-facing masks.
+for (const mat of materials) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.aiFeedbackTexture = feedbackUniforms.aiFeedbackTexture;
+    shader.uniforms.aiFeedbackStrength = feedbackUniforms.aiFeedbackStrength;
+    shader.vertexShader = `
+      attribute vec2 aiUv;
+      attribute float aiVisibility;
+      varying vec2 vAiUv;
+      varying float vAiVisibility;
+    ` + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n vAiUv = aiUv; vAiVisibility = aiVisibility;'
+    );
+
+    shader.fragmentShader = `
+      uniform sampler2D aiFeedbackTexture;
+      uniform float aiFeedbackStrength;
+      varying vec2 vAiUv;
+      varying float vAiVisibility;
+    ` + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      `
+      if (aiFeedbackStrength > 0.001 && vAiVisibility > 0.001 &&
+          vAiUv.x >= 0.0 && vAiUv.x <= 1.0 &&
+          vAiUv.y >= 0.0 && vAiUv.y <= 1.0) {
+        vec3 aiColor = texture2D(aiFeedbackTexture, vAiUv).rgb;
+        outgoingLight = mix(outgoingLight, aiColor,
+          clamp(aiFeedbackStrength * vAiVisibility, 0.0, 1.0));
+      }
+      #include <opaque_fragment>
+      `
+    );
+  };
+  mat.customProgramCacheKey = () => 'reail-screen-projection-v1';
+}
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let pieces = [];
@@ -103,7 +160,9 @@ const tuningIds = [
   'lock-seed',
   'inference-resolution',
   'fast-vae',
-  'skip-still'
+  'skip-still',
+  'feedback-loop',
+  'feedback-strength'
 ];
 
 function updateTuningLabels() {
@@ -145,7 +204,9 @@ function saveRemoteTuning() {
   try {
     localStorage.setItem('reail-diffusion-settings-sdxl-v1', JSON.stringify({
       ...getRemoteSettings(),
-      skipStill: $('skip-still').checked
+      skipStill: $('skip-still').checked,
+      feedbackLoop: $('feedback-loop').checked,
+      feedbackStrength: Number($('feedback-strength').value)/100
     }));
   } catch {}
 }
@@ -163,6 +224,10 @@ function restoreRemoteTuning() {
     if ([256,384,512].includes(saved.resolution)) $('inference-resolution').value = String(saved.resolution);
     if (typeof saved.fastVae === 'boolean') $('fast-vae').checked = saved.fastVae;
     if (typeof saved.skipStill === 'boolean') $('skip-still').checked = saved.skipStill;
+    if (typeof saved.feedbackLoop === 'boolean') $('feedback-loop').checked = saved.feedbackLoop;
+    if (Number.isFinite(saved.feedbackStrength)) {
+      $('feedback-strength').value = String(Math.round(saved.feedbackStrength*100));
+    }
   } catch {}
 }
 
@@ -170,6 +235,10 @@ function syncInferenceResolution() {
   const resolution = Number($('inference-resolution').value);
   remoteCapture.width = remoteCapture.height = resolution;
   output.width = output.height = resolution;
+  feedbackTexture.needsUpdate = true;
+  feedbackReady = false;
+  pendingProjection = null;
+  updateFeedbackStrength();
   $('resolution-label').textContent = resolution + '²';
   // New resolution must not be compared with the old downsampled source.
   lastProbe = null;
@@ -241,6 +310,13 @@ function makeGeometry(faces) {
   g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   g.setAttribute('normal',new THREE.Float32BufferAttribute(norms,3));
   g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+  // Every new fragment begins with an invalid projection: no ghosted texture.
+  g.setAttribute('aiUv',new THREE.BufferAttribute(
+    new Float32Array((pos.length/3)*2).fill(-1),2
+  ));
+  g.setAttribute('aiVisibility',new THREE.BufferAttribute(
+    new Float32Array(pos.length/3),1
+  ));
   g.clearGroups();
   g.addGroup(0,counts[0],0);
   g.addGroup(counts[0],counts[1],1);
@@ -248,6 +324,93 @@ function makeGeometry(faces) {
   g.computeBoundingSphere();
   return g;
 }
+function snapshotFeedbackProjection() {
+  scene.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  const viewProjection = new THREE.Matrix4().multiplyMatrices(
+    camera.projectionMatrix, camera.matrixWorldInverse
+  );
+  const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
+  const pieceMatrices = new Map();
+  for (const piece of pieces) {
+    pieceMatrices.set(piece.mesh.uuid, piece.mesh.matrixWorld.clone());
+  }
+  return {viewProjection, cameraPosition, pieceMatrices};
+}
+
+function applyFeedbackProjection(snapshot) {
+  if (!snapshot) return;
+
+  const worldPos = new THREE.Vector3();
+  const normalMatrix = new THREE.Matrix3();
+
+  for (const piece of pieces) {
+    const modelMatrix = snapshot.pieceMatrices.get(piece.mesh.uuid);
+    if (!modelMatrix) continue; // Newly cut fragment: wait for next AI result.
+
+    const geometry = piece.mesh.geometry;
+    const positions = geometry.getAttribute('position');
+    const normals = geometry.getAttribute('normal');
+    const uvAttr = geometry.getAttribute('aiUv');
+    const maskAttr = geometry.getAttribute('aiVisibility');
+    const uv = uvAttr.array;
+    const mask = maskAttr.array;
+
+    const clip = new THREE.Matrix4().multiplyMatrices(
+      snapshot.viewProjection, modelMatrix
+    ).elements;
+    const world = modelMatrix.elements;
+    normalMatrix.getNormalMatrix(modelMatrix);
+    const nm = normalMatrix.elements;
+    const cameraPos = snapshot.cameraPosition;
+
+    for (let i=0; i<positions.count; i++) {
+      const j=i*3, k=i*2;
+      const x=positions.array[j], y=positions.array[j+1], z=positions.array[j+2];
+
+      const w=clip[3]*x+clip[7]*y+clip[11]*z+clip[15];
+      if (w<=0.00001) {
+        uv[k]=-1; uv[k+1]=-1; mask[i]=0;
+        continue;
+      }
+
+      const px=(clip[0]*x+clip[4]*y+clip[8]*z+clip[12])/w;
+      const py=(clip[1]*x+clip[5]*y+clip[9]*z+clip[13])/w;
+      uv[k]=px*0.5+0.5;
+      uv[k+1]=py*0.5+0.5;
+
+      // Keep feedback on the source-visible surface, not the far hemisphere.
+      worldPos.set(
+        world[0]*x+world[4]*y+world[8]*z+world[12],
+        world[1]*x+world[5]*y+world[9]*z+world[13],
+        world[2]*x+world[6]*y+world[10]*z+world[14]
+      );
+      const nx=normals.array[j], ny=normals.array[j+1], nz=normals.array[j+2];
+      const nnx=nm[0]*nx+nm[3]*ny+nm[6]*nz;
+      const nny=nm[1]*nx+nm[4]*ny+nm[7]*nz;
+      const nnz=nm[2]*nx+nm[5]*ny+nm[8]*nz;
+      const tx=cameraPos.x-worldPos.x;
+      const ty=cameraPos.y-worldPos.y;
+      const tz=cameraPos.z-worldPos.z;
+      const facing=(nnx*tx+nny*ty+nnz*tz) /
+        Math.max(0.000001,Math.hypot(nnx,nny,nnz)*Math.hypot(tx,ty,tz));
+      mask[i]=THREE.MathUtils.clamp(facing*5,0,1);
+    }
+
+    uvAttr.needsUpdate=true;
+    maskAttr.needsUpdate=true;
+  }
+}
+
+function updateFeedbackStrength() {
+  feedbackUniforms.aiFeedbackStrength.value =
+    feedbackReady && $('feedback-loop').checked
+      ? Number($('feedback-strength').value)/100
+      : 0;
+  $('feedback-strength-label').textContent =
+    Math.round(Number($('feedback-strength').value))+'%';
+}
+
 function addPiece(faces, offset, velocity, dynamic) {
   const mesh = new THREE.Mesh(makeGeometry(faces),materials);
   mesh.castShadow=true;
@@ -499,6 +662,7 @@ for (const id of tuningIds) {
     if (id === 'diffusion-steps') enforceValidStrengthForSteps();
     else updateTuningLabels();
     if (id === 'inference-resolution') syncInferenceResolution();
+    if (id === 'feedback-loop' || id === 'feedback-strength') updateFeedbackStrength();
     saveRemoteTuning();
   });
   $(id).addEventListener('change', saveRemoteTuning);
@@ -537,6 +701,7 @@ function drawOutput(source){
   outputCtx.imageSmoothingEnabled=true;
   outputCtx.clearRect(0,0,output.width,output.height);
   outputCtx.drawImage(source,0,0,output.width,output.height);
+  feedbackTexture.needsUpdate = true;
   lastDisplay=source;
 }
 function noteAIFrame(ms) {
@@ -564,6 +729,7 @@ function stopSocket(){
 
 function connectRemote(){
   stopSocket();
+  pendingProjection=null;
   lastProbe=null;
   lastProbeSignature='';
   skippedFrames=0;
@@ -612,9 +778,10 @@ function connectRemote(){
     socket.onmessage=(event)=>{
       let msg;
       try{msg=JSON.parse(event.data);}catch{return;}
-      remotePending=false;
+      if(msg.type!=='frame') remotePending=false;
 
       if(msg.type==='error'){
+        pendingProjection=null;
         setBadge('ERROR','error');
         showOverlay('DIFFUSION ERROR',msg.message||'Unknown server error',true);
         return;
@@ -630,10 +797,26 @@ function connectRemote(){
 
       updateRemoteTelemetry(msg);
       const sentAt = lastRemoteSent;
+      const projection = pendingProjection?.frameId === msg.frameId
+        ? pendingProjection.snapshot : null;
+      const connection = socket;
       const picture=new Image();
       picture.onload=()=>{
+        if (socket!==connection) return;
+        // Finish applying the AI result BEFORE allowing the next request:
+        // the next source render must already contain this feedback texture.
         drawOutput(picture);
+        applyFeedbackProjection(projection);
+        feedbackReady=true;
+        updateFeedbackStrength();
         noteAIFrame(performance.now()-sentAt);
+        pendingProjection=null;
+        remotePending=false;
+      };
+      picture.onerror=()=>{
+        pendingProjection=null;
+        remotePending=false;
+        showOverlay('INVALID IMAGE','Could not decode the AI response.',true);
       };
       picture.src=msg.image;
     };
@@ -698,15 +881,19 @@ function animate(time) {
       lastRemoteSent=performance.now();
 
       try{
+        const frameId=++sequence;
+        const snapshot=snapshotFeedbackProjection();
         remoteCaptureCtx.drawImage(sceneCanvas,0,0,remoteCapture.width,remoteCapture.height);
+        pendingProjection={frameId,snapshot};
         socket.send(JSON.stringify({
           type:'frame',
           image:remoteCapture.toDataURL('image/jpeg',.80),
           prompt:$('prompt').value,
-          frameId:++sequence,
+          frameId,
           settings
         }));
       }catch(err){
+        pendingProjection=null;
         remotePending=false;
         console.error('ReAil frame send failed:',err);
       }
@@ -717,6 +904,7 @@ function animate(time) {
 restoreRemoteTuning();
 enforceValidStrengthForSteps();
 syncInferenceResolution();
+updateFeedbackStrength();
 resetSphere();
 resize();
 setBadge('OFFLINE');
