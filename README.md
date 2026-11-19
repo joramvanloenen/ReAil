@@ -2,58 +2,41 @@
 
 **Live demo:** https://joramvanloenen.github.io/ReAil/
 
-ReAil is a focused realtime image-to-image experiment. A neutral grey Three.js sphere can be rotated and sliced, then each 512×512 source frame is sent over WebSocket to a local **SDXL-Turbo** GPU backend.
+ReAil is a realtime img2img experiment: a sliceable grey Three.js sphere drives a local SDXL-Turbo server. The square source and output viewports always keep the same aspect ratio.
 
-## Current pipeline
+## Performance improvements
 
-```
-Three.js sphere
-      ↓
-512 × 512 source frame
-      ↓
-WebSocket
-      ↓
-SDXL-Turbo img2img
-      ↓
-512 × 512 AI frame
-```
+**AI resolution now means actual inference resolution**, not merely how large the generated image is displayed. Both the browser's JPEG capture and the Python diffusion input switch together:
 
-The source and AI viewports use the same square aspect ratio.
+| Resolution | Pixels | Notes |
+|---|---:|---|
+| 256×256 | 65,536 | Fastest; SDXL-Turbo detail/identity may suffer |
+| 384×384 | 147,456 | Default speed/quality compromise |
+| 512×512 | 262,144 | Native SDXL-Turbo resolution; highest quality of these options |
 
-## Controls
+The site also includes:
 
-The interface exposes only the controls used by the remote diffusion experiment:
+- **Prompt embedding cache:** SDXL's two text encoders run only when a prompt first appears (up to eight cached prompts).
+- **Fast VAE:** optional Tiny SDXL Autoencoder (`madebyollin/taesdxl`) for faster encode/decode, with some quality loss. First enable may download additional weights.
+- **Skip unchanged frames:** compares a low-resolution preview of the Three.js scene and avoids running diffusion on nearly identical frames. A forced refresh occurs every ~2.5 seconds. This reduces total GPU work when the scene hardly changes; it does **not** make an individual generated frame faster.
+- **Backpressure:** the browser keeps only one request in flight, sending the most recent current scene after each result rather than queuing obsolete frames.
+- **Accurate timing:** server timing synchronizes CUDA and separates model compute latency from full server processing; the browser separately reports end-to-end latency.
+- **Effective steps:** UI displays actual denoising steps / requested scheduler steps. For example, 2 configured steps at strength 0.5 usually means only one denoising step.
 
-- Slice / Orbit / Reset
-- WebSocket server address
-- Prompt
-- Maximum inference rate
-- Sphere rotation
-- AI transformation strength
-- Inference steps
-- Temporal stability
-- Motion response
-- Seed locking / randomization
-- Temporal-memory reset
-
-The default backend tuning is 2 inference steps, strength 0.5, guidance scale 0, fixed seed 1337, and 42% temporal stability.
+Tuning controls for strength, steps (1–4), temporal stability, motion response, seed, and FPS are retained. The current Three.js frame remains the image-to-image input on **every** generation, and locked noise can reduce flickering.
 
 ## Run locally
 
-Frontend:
+Start the frontend from the actual ReAil folder:
 
 ```powershell
 cd C:\Users\Joram\ReAil
 python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Open:
+Open http://127.0.0.1:8000.
 
-```
-http://127.0.0.1:8000
-```
-
-GPU backend:
+In a second terminal:
 
 ```powershell
 cd C:\Users\Joram\ReAil
@@ -62,35 +45,21 @@ pip install -r requirements.txt
 python -m uvicorn server:app --host 127.0.0.1 --port 8765
 ```
 
-The frontend connects to:
+The browser auto-connects to `ws://127.0.0.1:8765/ws`. Health: http://127.0.0.1:8765/health.
 
+## Local GPU benchmark
+
+Use the supplied script to compare actual single-frame inference latency on your GPU, excluding warm-up:
+
+```powershell
+python benchmark.py
+python benchmark.py --vae both --samples 7
 ```
-ws://127.0.0.1:8765/ws
-```
 
-Health check:
-
-```
-http://127.0.0.1:8765/health
-```
-
-The first SDXL-Turbo request may trigger a model download.
-
-## Backend
-
-The backend uses:
-
-- `stabilityai/sdxl-turbo`
-- Diffusers
-- PyTorch CUDA
-- FastAPI / WebSocket
-- FP16 inference
-- 512×512 input/output
-- fixed-seed temporal noise
-- adjustable output temporal blending
-
-This is still a proof of concept rather than StreamDiffusion/TensorRT. The actual AI frame rate depends on GPU and tuning.
+It benchmarks 256, 384, and 512 pixels with the same SDXL-Turbo pipeline and reports median processing time. Running the Tiny VAE variant may download its weights the first time. Results depend on your GPU, installed PyTorch/Diffusers versions, background GPU applications, and first-run warm-up.
 
 ## Deployment
 
-GitHub Pages hosts only the static frontend. `server.py` must run separately on a CUDA-capable machine.
+GitHub Pages hosts only the static frontend. `server.py` requires a local or separately hosted CUDA GPU and is not deployed to Pages. This backend uses ordinary Diffusers; TensorRT, compilation and StreamDiffusion are **not** enabled by default. No specific FPS is guaranteed.
+
+Dependencies: Three.js, SDXL-Turbo, PyTorch CUDA, Diffusers, FastAPI, and optional TAESDXL.
