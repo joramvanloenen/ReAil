@@ -57,6 +57,13 @@
             <div class="viewport-corner top-left" id="model-corner">NN_01 · BOOT</div>
             <div class="viewport-corner bottom-left" id="output-resolution">96 × 96 OUTPUT</div>
             <div class="viewport-corner bottom-right" id="ai-fps">-- FPS</div>
+            <div class="ai-telemetry" id="ai-telemetry" hidden>
+              <span>STR <b id="stat-strength">—</b></span>
+              <span>STEPS <b id="stat-steps">—</b></span>
+              <span>MOTION <b id="stat-motion">—</b></span>
+              <span>SEED <b id="stat-seed">—</b></span>
+              <span>GPU <b id="stat-gpu">—</b></span>
+            </div>
           </div>
           <div class="viewer-foot"><span id="ai-mode-label">NEURAL / LOCAL</span><span id="ai-latency">LATENCY —</span></div>
         </section>
@@ -103,6 +110,54 @@
           <div class="remote-field"><label for="socket-url">DIFFUSION WEBSOCKET</label><input type="url" id="socket-url" placeholder="ws://127.0.0.1:8765" value="ws://127.0.0.1:8765"></div>
           <div class="remote-field prompt"><label for="prompt">PROMPT</label><input id="prompt" value="A photorealistic red apple, cut open, ivory flesh, cinematic studio lighting, fine natural texture"></div>
           <button class="button primary" id="connect" type="button">CONNECT</button>
+
+          <div class="remote-tuning">
+            <div class="tuning-head">
+              <span>LIVE DIFFUSION TUNING</span>
+              <span class="tuning-state">APPLIES ON NEXT FRAME</span>
+            </div>
+            <div class="tuning-grid">
+              <div class="tuning-control">
+                <label for="diffusion-strength">AI TRANSFORMATION <strong id="diffusion-strength-label">0.34</strong></label>
+                <input id="diffusion-strength" type="range" min="13" max="100" value="34">
+                <div class="range-captions"><span>FAITHFUL</span><span>CREATIVE</span></div>
+              </div>
+
+              <div class="tuning-control">
+                <label for="diffusion-steps">INFERENCE STEPS <strong id="diffusion-steps-label">4</strong></label>
+                <input id="diffusion-steps" type="range" min="1" max="8" step="1" value="4">
+                <div class="range-captions"><span>FAST</span><span>MORE DENOISE</span></div>
+              </div>
+
+              <div class="tuning-control">
+                <label for="temporal-stability">TEMPORAL STABILITY <strong id="temporal-stability-label">35%</strong></label>
+                <input id="temporal-stability" type="range" min="0" max="90" value="35">
+                <div class="range-captions"><span>RESPONSIVE</span><span>LOCKED</span></div>
+              </div>
+
+              <div class="tuning-control">
+                <label for="motion-response">MOTION RESPONSE <strong id="motion-response-label">1.00×</strong></label>
+                <input id="motion-response" type="range" min="0" max="200" value="100">
+                <div class="range-captions"><span>IGNORE</span><span>REACT</span></div>
+              </div>
+
+              <div class="tuning-control seed-control">
+                <label for="diffusion-seed">NOISE SEED</label>
+                <div class="seed-row">
+                  <input id="diffusion-seed" type="number" min="0" max="2147483647" step="1" value="1337">
+                  <button class="button secondary compact" id="randomize-seed" type="button">RANDOMIZE</button>
+                </div>
+                <label class="check-row seed-lock"><input id="lock-seed" type="checkbox" checked> LOCK SAME NOISE EACH FRAME</label>
+              </div>
+
+              <div class="tuning-control memory-control">
+                <label>TEMPORAL MEMORY</label>
+                <button class="button secondary full" id="reset-ai-memory" type="button">↺ RESET AI MEMORY</button>
+                <span class="microcopy">Clears only the previous AI/source frames. The Three.js scene stays untouched.</span>
+              </div>
+            </div>
+          </div>
+
           <p>Requires your own GPU inference server. This static GitHub Pages site cannot host diffusion. See <a href="https://github.com/joramvanloenen/ReAil#optional-photorealistic-diffusion-server" target="_blank" rel="noopener noreferrer">server setup ↗</a>.</p>
         </div>
       </section>
