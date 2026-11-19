@@ -38,7 +38,7 @@
             <span id="ai-fps">-- FPS</span>
           </div>
           <div class="viewport output-viewport">
-            <canvas id="ai-canvas" width="512" height="512" aria-label="SDXL-Turbo output"></canvas>
+            <canvas id="ai-canvas" width="384" height="384" aria-label="SDXL-Turbo output"></canvas>
             <div class="ai-overlay" id="ai-overlay">
               <div class="loading-spinner"></div>
               <b id="overlay-title">OFFLINE</b>
@@ -49,6 +49,9 @@
               <span>STEP <b id="stat-steps">—</b></span>
               <span>MOVE <b id="stat-motion">—</b></span>
               <span>GPU <b id="stat-gpu">—</b></span>
+              <span>RES <b id="stat-resolution">—</b></span>
+              <span>SERVER <b id="stat-server">—</b></span>
+              <span>SKIPPED <b id="stat-skipped">0</b></span>
             </div>
           </div>
         </section>
@@ -78,8 +81,20 @@
         </div>
 
         <div class="control-block">
+          <label for="inference-resolution">AI RESOLUTION <strong id="resolution-label">384²</strong></label>
+          <select id="inference-resolution" title="Actual SDXL GPU input and output size">
+            <option value="256">256 × 256 — FAST</option>
+            <option value="384" selected>384 × 384 — BALANCED</option>
+            <option value="512">512 × 512 — QUALITY</option>
+          </select>
+        </div>
+
+        <div class="control-block">
           <label for="rate">RATE <strong id="rate-label">10 FPS</strong></label>
           <input id="rate" type="range" min="1" max="30" value="10">
+          <label class="check" title="Avoid GPU inference when the Three.js image has barely changed">
+            <input id="skip-still" type="checkbox" checked> SKIP UNCHANGED
+          </label>
         </div>
 
         <div class="control-block">
@@ -101,6 +116,9 @@
         <div class="control-block">
           <label for="temporal-stability">STABILITY <strong id="temporal-stability-label">42%</strong></label>
           <input id="temporal-stability" type="range" min="0" max="90" value="42">
+          <label class="check" title="Use the smaller SDXL autoencoder. Faster, but lower image fidelity; first use downloads extra weights.">
+            <input id="fast-vae" type="checkbox"> FAST VAE
+          </label>
         </div>
 
         <div class="control-block">
