@@ -50,8 +50,11 @@ function headPoint(theta, t) {
   let x = Math.cos(theta) * s * 0.80 * jaw;
   let z = Math.sin(theta) * s * 0.72;
 
-  const front = Math.max(0, Math.sin(theta));
-  const back = Math.max(0, -Math.sin(theta));
+  // Fade all sculpted features to zero at the poles, keeping the mesh
+  // completely closed for triangulation and physical slicing.
+  const poleFade = Math.pow(Math.max(0, s), 0.6);
+  const front = Math.max(0, Math.sin(theta)) * poleFade;
+  const back = Math.max(0, -Math.sin(theta)) * poleFade;
   const ax = Math.abs(x);
   // Forehead, temples and cheekbones.
   z += front * (
