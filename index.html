@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#111512">
-  <meta name="description" content="ReAil — interactive 3D apple slicing piped through real-time AI image-to-image models.">
+  <meta name="description" content="ReAil — interactive 3D grey sphere slicing piped through real-time AI image-to-image models.">
   <title>ReAil — Reality, re-rendered.</title>
   <link rel="stylesheet" href="./style.css">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
@@ -29,19 +29,19 @@
         <div class="intro-row">
           <div>
             <h1>A different kind<br>of <em>reality.</em></h1>
-            <p>Cut a digital apple. Watch a neural network reinterpret every frame. Two renderers, one continuously changing object.</p>
+            <p>Cut a neutral grey sphere. Watch SDXL-Turbo reinterpret the changing geometry frame by frame. Two renderers, one continuously changing object.</p>
           </div>
-          <div class="experiment-id">001 <span>/</span> APPLE STUDY</div>
+          <div class="experiment-id">001 <span>/</span> SPHERE STUDY</div>
         </div>
       </div>
 
       <div class="viewer-grid">
-        <section class="viewer source-view" aria-label="Interactive 3D apple">
+        <section class="viewer source-view" aria-label="Interactive 3D grey sphere">
           <div class="viewer-head"><div class="viewer-num">01 <span>/</span></div><div class="viewer-title">SOURCE <span>— THREE.JS</span></div><span class="pill">LIVE 3D</span></div>
           <div class="viewport" id="scene-viewport">
-            <canvas id="scene-canvas" aria-label="Drag across the apple to slice it" role="img"></canvas>
+            <canvas id="scene-canvas" aria-label="Drag across the sphere to slice it" role="img"></canvas>
             <canvas id="stroke-canvas" aria-hidden="true"></canvas>
-            <div class="scene-hint" id="scene-hint"><span class="crosshair">✳</span> DRAG ACROSS APPLE TO SLICE</div>
+            <div class="scene-hint" id="scene-hint"><span class="crosshair">✳</span> DRAG ACROSS SPHERE TO SLICE</div>
             <div class="viewport-corner top-left">RDR_01 <span>·</span> WEBGL</div>
             <div class="viewport-corner bottom-left" id="mesh-count">01 MESH</div>
             <div class="viewport-corner bottom-right" id="scene-fps">-- FPS</div>
@@ -99,7 +99,7 @@
           </div>
 
           <div class="control-group">
-            <label for="rotation">APPLE ROTATION <strong id="rotation-label">0.28 RAD/S</strong></label>
+            <label for="rotation">SPHERE ROTATION <strong id="rotation-label">0.28 RAD/S</strong></label>
             <input id="rotation" type="range" min="0" max="150" value="28">
             <label class="check-row"><input id="auto-rotate" type="checkbox" checked> CONTINUOUS ROTATION</label>
             <label class="check-row"><input id="pixelated" type="checkbox" checked> PIXELATED UPSCALING</label>
@@ -108,7 +108,7 @@
         </div>
         <div class="remote-settings" id="remote-settings" hidden>
           <div class="remote-field"><label for="socket-url">DIFFUSION WEBSOCKET</label><input type="url" id="socket-url" placeholder="ws://127.0.0.1:8765/ws" value="ws://127.0.0.1:8765/ws"></div>
-          <div class="remote-field prompt"><label for="prompt">PROMPT</label><input id="prompt" value="A photorealistic red apple, cut open, ivory flesh, cinematic studio lighting, fine natural texture"></div>
+          <div class="remote-field prompt"><label for="prompt">PROMPT</label><input id="prompt" value="Photorealistic smooth matte grey sphere, preserve exact silhouette and orientation, lighter grey solid interior where sliced, natural studio lighting, stable object identity"></div>
           <button class="button primary" id="connect" type="button">CONNECT</button>
 
           <div class="remote-tuning">
@@ -118,20 +118,20 @@
             </div>
             <div class="tuning-grid">
               <div class="tuning-control">
-                <label for="diffusion-strength">AI TRANSFORMATION <strong id="diffusion-strength-label">0.34</strong></label>
-                <input id="diffusion-strength" type="range" min="13" max="100" value="34">
+                <label for="diffusion-strength">AI TRANSFORMATION <strong id="diffusion-strength-label">0.50</strong></label>
+                <input id="diffusion-strength" type="range" min="13" max="100" value="50">
                 <div class="range-captions"><span>FAITHFUL</span><span>CREATIVE</span></div>
               </div>
 
               <div class="tuning-control">
-                <label for="diffusion-steps">INFERENCE STEPS <strong id="diffusion-steps-label">4</strong></label>
-                <input id="diffusion-steps" type="range" min="1" max="8" step="1" value="4">
+                <label for="diffusion-steps">INFERENCE STEPS <strong id="diffusion-steps-label">2</strong></label>
+                <input id="diffusion-steps" type="range" min="1" max="8" step="1" value="2">
                 <div class="range-captions"><span>FAST</span><span>MORE DENOISE</span></div>
               </div>
 
               <div class="tuning-control">
-                <label for="temporal-stability">TEMPORAL STABILITY <strong id="temporal-stability-label">35%</strong></label>
-                <input id="temporal-stability" type="range" min="0" max="90" value="35">
+                <label for="temporal-stability">TEMPORAL STABILITY <strong id="temporal-stability-label">42%</strong></label>
+                <input id="temporal-stability" type="range" min="0" max="90" value="42">
                 <div class="range-captions"><span>RESPONSIVE</span><span>LOCKED</span></div>
               </div>
 
