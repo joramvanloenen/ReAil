@@ -15,8 +15,9 @@ function triangulatedSurface(sample, around = 96, rows = 64) {
       const a1 = (x + 1) / around * Math.PI * 2;
       const a = sample(a0, t0), b = sample(a1, t0);
       const c = sample(a1, t1), d = sample(a0, t1);
-      if (y !== 0) out.push(face(a, c, b));
-      if (y !== rows - 1) out.push(face(a, d, c));
+      // Outward-facing winding; vertex normals point out of the object too.
+      if (y !== 0) out.push(face(a, b, c));
+      if (y !== rows - 1) out.push(face(a, c, d));
     }
   }
   return out;
@@ -113,7 +114,13 @@ export function initialBlobNodes() {
 export function makeBlobFaces(nodes, resolution = 26) {
   if (!nodes.length) return [];
   const N = Math.max(14, Math.min(34, resolution));
-  const half = 1.65;
+  const half = Math.max(1.65, ...nodes.map(node => (
+    Math.max(
+      Math.abs(node.position.x),
+      Math.abs(node.position.y),
+      Math.abs(node.position.z)
+    ) + node.radius * 1.5
+  )));
   const step = half * 2 / N;
   const side = N + 1;
   const count = side ** 3;
@@ -199,15 +206,20 @@ export function makeBlobFaces(nodes, resolution = 26) {
         for (let i = 0; i < 8; i++) {
           const [ox, oy, oz] = offsets[i];
           cubeValues[i] = samples[index(x + ox, y + oy, z + oz)];
+          if (cubeValues[i] < level) allInside = false;
+          else allOutside = false;
+        }
+        if (allInside || allOutside) continue;
+        // Only allocate vertex vectors for the small number of cells that
+        // actually cross the implicit surface.
+        for (let i = 0; i < 8; i++) {
+          const [ox, oy, oz] = offsets[i];
           cubePositions[i] = new THREE.Vector3(
             -half + (x + ox) * step,
             -half + (y + oy) * step,
             -half + (z + oz) * step
           );
-          if (cubeValues[i] < level) allInside = false;
-          else allOutside = false;
         }
-        if (allInside || allOutside) continue;
 
         for (const tet of tetrahedra) {
           const inside = tet.filter(i => cubeValues[i] >= level);
