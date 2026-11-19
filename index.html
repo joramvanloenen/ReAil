@@ -3,169 +3,125 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#111512">
-  <meta name="description" content="ReAil — interactive 3D grey sphere slicing piped through real-time AI image-to-image models.">
-  <title>ReAil — Reality, re-rendered.</title>
+  <meta name="theme-color" content="#090909">
+  <meta name="description" content="ReAil — realtime Three.js to SDXL-Turbo image-to-image experiment.">
+  <title>ReAil</title>
   <link rel="stylesheet" href="./style.css">
-  <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <link rel="preconnect" href="https://huggingface.co">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand">
-        <div class="mark" aria-hidden="true"><span></span><span></span></div>
-        <div class="wordmark">Re<span>AI</span>l</div>
-        <div class="tagline">REALITY, RE-RENDERED</div>
-      </div>
-      <div class="top-meta"><span class="live-dot"></span> LIVE EXPERIMENT <span class="separator">/</span> BUILD 001</div>
-      <a class="github" href="https://github.com/joramvanloenen/ReAil" target="_blank" rel="noopener noreferrer">SOURCE <span aria-hidden="true">↗</span></a>
+      <div class="wordmark">Re<span>AI</span>l</div>
+      <div class="connection-state"><span id="ai-badge" class="status">OFFLINE</span></div>
     </header>
 
     <main class="main">
-      <div class="introduction">
-        <div class="eyebrow">EXPERIMENT 001 <span class="accent-line"></span> IMAGE-TO-IMAGE</div>
-        <div class="intro-row">
-          <div>
-            <h1>A different kind<br>of <em>reality.</em></h1>
-            <p>Cut a neutral grey sphere. Watch SDXL-Turbo reinterpret the changing geometry frame by frame. Two renderers, one continuously changing object.</p>
-          </div>
-          <div class="experiment-id">001 <span>/</span> SPHERE STUDY</div>
-        </div>
-      </div>
-
       <div class="viewer-grid">
-        <section class="viewer source-view" aria-label="Interactive 3D grey sphere">
-          <div class="viewer-head"><div class="viewer-num">01 <span>/</span></div><div class="viewer-title">SOURCE <span>— THREE.JS</span></div><span class="pill">LIVE 3D</span></div>
-          <div class="viewport" id="scene-viewport">
-            <canvas id="scene-canvas" aria-label="Drag across the sphere to slice it" role="img"></canvas>
-            <canvas id="stroke-canvas" aria-hidden="true"></canvas>
-            <div class="scene-hint" id="scene-hint"><span class="crosshair">✳</span> DRAG ACROSS SPHERE TO SLICE</div>
-            <div class="viewport-corner top-left">RDR_01 <span>·</span> WEBGL</div>
-            <div class="viewport-corner bottom-left" id="mesh-count">01 MESH</div>
-            <div class="viewport-corner bottom-right" id="scene-fps">-- FPS</div>
+        <section class="viewer">
+          <div class="viewer-bar">
+            <span>THREE.JS</span>
+            <span id="scene-fps">-- FPS</span>
           </div>
-          <div class="viewer-foot"><span>GEOMETRY / REAL-TIME</span><span>DRAG TO CUT <span class="dot-divider">·</span> SCROLL TO ZOOM</span></div>
+          <div class="viewport" id="scene-viewport">
+            <canvas id="scene-canvas" aria-label="Sliceable grey sphere"></canvas>
+            <canvas id="stroke-canvas" aria-hidden="true"></canvas>
+            <div class="scene-hint" id="scene-hint">DRAG TO SLICE</div>
+            <div class="corner" id="mesh-count">01 MESH</div>
+          </div>
         </section>
 
-        <section class="viewer ai-view" aria-label="AI generated output">
-          <div class="viewer-head"><div class="viewer-num">02 <span>/</span></div><div class="viewer-title">INTERPRETATION <span>— NEURAL</span></div><span class="pill" id="ai-badge">STARTING</span></div>
+        <section class="viewer">
+          <div class="viewer-bar">
+            <span>SDXL-TURBO</span>
+            <span id="ai-latency">-- MS</span>
+            <span id="ai-fps">-- FPS</span>
+          </div>
           <div class="viewport output-viewport">
-            <div class="output-display"><canvas id="ai-canvas" width="96" height="96" aria-label="Neural style transfer output"></canvas></div>
-            <div class="ai-overlay" id="ai-overlay"><div class="loading-spinner"></div><b id="overlay-title">Initializing renderer</b><span id="overlay-sub">Preparing the first frame</span></div>
-            <div class="viewport-corner top-left" id="model-corner">NN_01 · BOOT</div>
-            <div class="viewport-corner bottom-left" id="output-resolution">96 × 96 OUTPUT</div>
-            <div class="viewport-corner bottom-right" id="ai-fps">-- FPS</div>
+            <canvas id="ai-canvas" width="512" height="512" aria-label="SDXL-Turbo output"></canvas>
+            <div class="ai-overlay" id="ai-overlay">
+              <div class="loading-spinner"></div>
+              <b id="overlay-title">OFFLINE</b>
+              <span id="overlay-sub">Start the diffusion server or connect below.</span>
+            </div>
             <div class="ai-telemetry" id="ai-telemetry" hidden>
               <span>STR <b id="stat-strength">—</b></span>
-              <span>STEPS <b id="stat-steps">—</b></span>
-              <span>MOTION <b id="stat-motion">—</b></span>
-              <span>SEED <b id="stat-seed">—</b></span>
+              <span>STEP <b id="stat-steps">—</b></span>
+              <span>MOVE <b id="stat-motion">—</b></span>
               <span>GPU <b id="stat-gpu">—</b></span>
             </div>
           </div>
-          <div class="viewer-foot"><span id="ai-mode-label">NEURAL / LOCAL</span><span id="ai-latency">LATENCY —</span></div>
         </section>
       </div>
 
-      <section class="control-desk" aria-label="Experiment settings">
-        <div class="control-heading"><span class="eyebrow">EXPERIMENT CONTROLS</span><span class="control-note">ADJUST THE INPUT. OBSERVE THE OUTPUT.</span></div>
-        <div class="controls">
-          <div class="control-group tool-group">
-            <label>INTERACTION</label>
-            <div class="segmented" role="group" aria-label="Interaction tool">
-              <button id="tool-slice" class="seg active" type="button" aria-pressed="true">✳ &nbsp; SLICE</button>
-              <button id="tool-orbit" class="seg" type="button" aria-pressed="false">◎ &nbsp; ORBIT</button>
-            </div>
-            <div class="action-row"><button id="slice-once" class="button primary" type="button">+ MAKE A CUT</button><button id="reset" class="button secondary" type="button">↺ RESET</button></div>
-          </div>
-
-          <div class="control-group">
-            <label for="engine">AI PIPELINE</label>
-            <select id="engine" class="select"><option value="onnx">LOCAL NEURAL STYLE (ONNX)</option><option value="remote">REMOTE DIFFUSION (WS)</option><option value="preview">RAW PREVIEW · NO AI</option></select>
-            <label for="style" class="sub-label">MODEL</label>
-            <select id="style" class="select"><option value="candy">CANDY — PAINTERLY</option><option value="mosaic">MOSAIC — FACETED</option><option value="rain-princess">RAIN PRINCESS — BRUSHED</option><option value="udnie">UDNIE — ABSTRACT</option></select>
-          </div>
-
-          <div class="control-group">
-            <label for="resolution">OUTPUT RESOLUTION <strong id="resolution-label">96 × 96</strong></label>
-            <input id="resolution" type="range" min="0" max="3" step="1" value="1" list="resolution-ticks">
-            <datalist id="resolution-ticks"><option value="0"><option value="1"><option value="2"><option value="3"></datalist>
-            <div class="range-captions"><span>64 PX</span><span>224 PX</span></div>
-            <label for="rate" class="sub-label">MAX INFERENCE RATE <strong id="rate-label">15 FPS</strong></label>
-            <input id="rate" type="range" min="1" max="30" value="15">
-            <div class="range-captions"><span>1 FPS</span><span>30 FPS</span></div>
-          </div>
-
-          <div class="control-group">
-            <label for="rotation">SPHERE ROTATION <strong id="rotation-label">0.28 RAD/S</strong></label>
-            <input id="rotation" type="range" min="0" max="150" value="28">
-            <label class="check-row"><input id="auto-rotate" type="checkbox" checked> CONTINUOUS ROTATION</label>
-            <label class="check-row"><input id="pixelated" type="checkbox" checked> PIXELATED UPSCALING</label>
-            <label class="check-row"><input id="show-raw" type="checkbox"> SHOW RAW BEFORE AI</label>
+      <section class="controls">
+        <div class="control-block interaction">
+          <label>VIEW</label>
+          <div class="button-row">
+            <button id="tool-slice" class="button active" type="button">SLICE</button>
+            <button id="tool-orbit" class="button" type="button">ORBIT</button>
+            <button id="reset" class="button" type="button">RESET</button>
           </div>
         </div>
-        <div class="remote-settings" id="remote-settings" hidden>
-          <div class="remote-field"><label for="socket-url">DIFFUSION WEBSOCKET</label><input type="url" id="socket-url" placeholder="ws://127.0.0.1:8765/ws" value="ws://127.0.0.1:8765/ws"></div>
-          <div class="remote-field prompt"><label for="prompt">PROMPT</label><input id="prompt" value="Photorealistic smooth matte grey sphere, preserve exact silhouette and orientation, lighter grey solid interior where sliced, natural studio lighting, stable object identity"></div>
-          <button class="button primary" id="connect" type="button">CONNECT</button>
 
-          <div class="remote-tuning">
-            <div class="tuning-head">
-              <span>LIVE DIFFUSION TUNING</span>
-              <span class="tuning-state">APPLIES ON NEXT FRAME</span>
-            </div>
-            <div class="tuning-grid">
-              <div class="tuning-control">
-                <label for="diffusion-strength">AI TRANSFORMATION <strong id="diffusion-strength-label">0.50</strong></label>
-                <input id="diffusion-strength" type="range" min="13" max="100" value="50">
-                <div class="range-captions"><span>FAITHFUL</span><span>CREATIVE</span></div>
-              </div>
-
-              <div class="tuning-control">
-                <label for="diffusion-steps">INFERENCE STEPS <strong id="diffusion-steps-label">2</strong></label>
-                <input id="diffusion-steps" type="range" min="1" max="8" step="1" value="2">
-                <div class="range-captions"><span>FAST</span><span>MORE DENOISE</span></div>
-              </div>
-
-              <div class="tuning-control">
-                <label for="temporal-stability">TEMPORAL STABILITY <strong id="temporal-stability-label">42%</strong></label>
-                <input id="temporal-stability" type="range" min="0" max="90" value="42">
-                <div class="range-captions"><span>RESPONSIVE</span><span>LOCKED</span></div>
-              </div>
-
-              <div class="tuning-control">
-                <label for="motion-response">MOTION RESPONSE <strong id="motion-response-label">1.00×</strong></label>
-                <input id="motion-response" type="range" min="0" max="200" value="100">
-                <div class="range-captions"><span>IGNORE</span><span>REACT</span></div>
-              </div>
-
-              <div class="tuning-control seed-control">
-                <label for="diffusion-seed">NOISE SEED</label>
-                <div class="seed-row">
-                  <input id="diffusion-seed" type="number" min="0" max="2147483647" step="1" value="1337">
-                  <button class="button secondary compact" id="randomize-seed" type="button">RANDOMIZE</button>
-                </div>
-                <label class="check-row seed-lock"><input id="lock-seed" type="checkbox" checked> LOCK SAME NOISE EACH FRAME</label>
-              </div>
-
-              <div class="tuning-control memory-control">
-                <label>TEMPORAL MEMORY</label>
-                <button class="button secondary full" id="reset-ai-memory" type="button">↺ RESET AI MEMORY</button>
-                <span class="microcopy">Clears only the previous AI/source frames. The Three.js scene stays untouched.</span>
-              </div>
-            </div>
+        <div class="control-block connection">
+          <label for="socket-url">SERVER</label>
+          <div class="input-row">
+            <input id="socket-url" value="ws://127.0.0.1:8765/ws">
+            <button id="connect" class="button primary" type="button">CONNECT</button>
           </div>
+        </div>
 
-          <p>Requires your own GPU inference server. This static GitHub Pages site cannot host diffusion. See <a href="https://github.com/joramvanloenen/ReAil#optional-photorealistic-diffusion-server" target="_blank" rel="noopener noreferrer">server setup ↗</a>.</p>
+        <div class="control-block prompt-block">
+          <label for="prompt">PROMPT</label>
+          <input id="prompt" value="Photorealistic smooth matte grey sphere, preserve exact silhouette and orientation, lighter grey solid interior where sliced, natural studio lighting, stable object identity">
+        </div>
+
+        <div class="control-block">
+          <label for="rate">RATE <strong id="rate-label">10 FPS</strong></label>
+          <input id="rate" type="range" min="1" max="30" value="10">
+        </div>
+
+        <div class="control-block">
+          <label for="rotation">ROTATION <strong id="rotation-label">0.28</strong></label>
+          <input id="rotation" type="range" min="0" max="150" value="28">
+          <label class="check"><input id="auto-rotate" type="checkbox" checked> AUTO</label>
+        </div>
+
+        <div class="control-block">
+          <label for="diffusion-strength">TRANSFORM <strong id="diffusion-strength-label">0.50</strong></label>
+          <input id="diffusion-strength" type="range" min="13" max="100" value="50">
+        </div>
+
+        <div class="control-block">
+          <label for="diffusion-steps">STEPS <strong id="diffusion-steps-label">2</strong></label>
+          <input id="diffusion-steps" type="range" min="1" max="8" step="1" value="2">
+        </div>
+
+        <div class="control-block">
+          <label for="temporal-stability">STABILITY <strong id="temporal-stability-label">42%</strong></label>
+          <input id="temporal-stability" type="range" min="0" max="90" value="42">
+        </div>
+
+        <div class="control-block">
+          <label for="motion-response">MOTION <strong id="motion-response-label">1.00×</strong></label>
+          <input id="motion-response" type="range" min="0" max="200" value="100">
+        </div>
+
+        <div class="control-block seed-block">
+          <label for="diffusion-seed">SEED</label>
+          <div class="input-row">
+            <input id="diffusion-seed" type="number" min="0" max="2147483647" value="1337">
+            <button id="randomize-seed" class="button" type="button">RANDOM</button>
+          </div>
+          <label class="check"><input id="lock-seed" type="checkbox" checked> LOCK</label>
+        </div>
+
+        <div class="control-block memory-block">
+          <label>MEMORY</label>
+          <button id="reset-ai-memory" class="button" type="button">RESET AI MEMORY</button>
         </div>
       </section>
-
-      <footer class="footer">
-        <div class="footer-left"><span class="footer-accent">✳</span> <b>WHAT IS ACTUALLY AI?</b> <span id="truth">Loading a real 224² feed-forward neural image-to-image model. Output may be slower than the 3D viewport.</span></div>
-        <span class="footer-right">REAIL LAB <span>·</span> 2026</span>
-      </footer>
     </main>
   </div>
   <script type="module" src="./src.js"></script>
