@@ -466,7 +466,7 @@ function syncSelectedBlobRadius() {
   $('blob-radius-label').textContent = node.radius.toFixed(2);
 }
 
-function rebuildBlobMesh() {
+function rebuildBlobMesh(preview = false) {
   if (sourceKind !== 'blob') return;
   sourceRevision++;
   for (const piece of pieces) {
@@ -474,7 +474,7 @@ function rebuildBlobMesh() {
     piece.mesh.geometry.dispose();
   }
   pieces = [];
-  const faces = makeBlobFaces(blobNodes);
+  const faces = makeBlobFaces(blobNodes, preview ? 20 : 28);
   if (faces.length) {
     addPiece(faces, new THREE.Vector3(), new THREE.Vector3(), false);
   }
@@ -850,7 +850,7 @@ sceneCanvas.addEventListener('pointermove', e => {
       if(handle) handle.position.copy(local);
       if(performance.now()-lastBlobRebuildAt>85){
         lastBlobRebuildAt=performance.now();
-        rebuildBlobMesh();
+        rebuildBlobMesh(true);
       }
     }
     return;
@@ -934,10 +934,10 @@ $('blob-radius').addEventListener('input',e=>{
   $('blob-radius-label').textContent=node.radius.toFixed(2);
   if(performance.now()-lastBlobRebuildAt>85){
     lastBlobRebuildAt=performance.now();
-    rebuildBlobMesh();
+    rebuildBlobMesh(true);
   }
 });
-$('blob-radius').addEventListener('change',rebuildBlobMesh);
+$('blob-radius').addEventListener('change',()=>rebuildBlobMesh());
 
 function updateParticleLabels(){
   $('particle-rate-label').textContent=(Number($('particle-rate').value)/100).toFixed(1);
