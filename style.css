@@ -150,3 +150,13 @@ input[type=checkbox]{width:12px;height:12px;accent-color:#aaa}
   color:#ddd;outline:0;padding:0 8px;font:9px var(--mono);cursor:pointer
 }
 .control-block select:focus{border-color:#777}
+
+
+/* Source-specific controls appear only for the selected geometry. */
+[hidden], .control-block[hidden], .button[hidden] { display:none !important; }
+.source-shape select {font-weight:500;letter-spacing:.25px}
+.blob-tools .button-row {margin-top:8px}
+.blob-tools .button {flex:1}
+.particle-tools > label:not(.check) {margin-top:7px}
+.particle-tools > label:first-child {margin-top:0}
+.particle-tools input[type=range] {margin:5px 0 9px}
