@@ -4,6 +4,23 @@
 
 ReAil is a realtime img2img experiment: a sliceable grey Three.js sphere drives a local SDXL-Turbo server. The square source and output viewports always keep the same aspect ratio.
 
+## Selectable Three.js sources
+
+Use **SOURCE GEOMETRY** to swap the scene driving SDXL-Turbo:
+
+| Source | Behavior |
+|---|---|
+| Grey sphere | Original solid, continuously rotating and sliceable sphere |
+| Rough human head | Procedurally sculpted grey clay head with nose, brows, sockets, lips, chin, ears and a closed triangulated surface that can be sliced |
+| Editable metaball blob | Connected implicit iso-surface generated from movable field lobes using marching tetrahedra |
+| Zero-G particles | Individual 3D grey spheres, emitted slowly, floating without gravity, attracted to each other with short-range separation and soft cloud containment |
+
+The **rough head and metaball blob** use the existing mesh-slicing interaction. To sculpt the blob, select **EDIT**, drag the white handles in the Three.js viewport, adjust the selected lobe's radius and use **+ LOBE / − LOBE** to change the shape. Select **ORBIT** to change the viewing angle before moving lobes in depth. During dragging, the blob is extracted at reduced resolution for responsiveness; releasing the handle rebuilds a smoother mesh.
+
+The particle source defaults to **ORBIT**. Set **EMIT / SEC**, **ATTRACTION**, and **SEPARATION** to control its physical behavior. The emitter starts with a small visible cluster and adds particles gradually, to a bounded count. There is no downward gravity and the floor is hidden.
+
+Each source updates the suggested SDXL prompt unless you've entered your own prompt. The existing AI texture feedback applies to the head, metaball and individual particles. Blob edit handles are hidden from captured AI input frames, and stale AI frames from the previous shape or an earlier mesh edit are ignored.
+
 ## Performance improvements
 
 **AI resolution now means actual inference resolution**, not merely how large the generated image is displayed. Both the browser's JPEG capture and the Python diffusion input switch together:
