@@ -13,6 +13,8 @@ Interactive proof of concept: a rotating, cuttable Three.js apple is captured at
 - **Optional generative diffusion:** a Python CUDA SD-Turbo img2img backend with WebSocket support, prompt input, and frame transport. This is a different model from the browser neural-style option.
 - Select 64×64, 96×96, 128×128, or 224×224 display output. Adjust requested inference rate, pixelated scaling, and compare against raw preview.
 - Real scene-FPS, measured AI-result-FPS, and end-to-end inference latency indicators.
+- Live remote-diffusion tuning for transformation strength, inference steps, temporal stability, motion response, seed locking/randomization, and temporal-memory reset. Changes apply on the next generated frame without restarting Uvicorn.
+- Remote telemetry shows the effective strength, steps, source motion, seed and GPU compute time returned by the server.
 - Clearly labeled **raw preview / NOT AI** fallback if inference cannot initialize. No pretend image generation.
 
 ## How the pipeline works
@@ -66,7 +68,7 @@ Response:
 
 For use from an HTTPS-hosted GitHub Pages site, your browser may block insecure ws:// requests, except where browser rules permit trusted localhost loopback. If blocked, run the UI locally over HTTP or expose the server securely via **wss://** and proper authentication. Do not expose the example backend openly: it has no authentication and allows expensive GPU operations.
 
-The optional backend is a proof of concept, **not StreamDiffusion** and not yet temporally stabilized. It processes frames asynchronously one at a time. For sustained real-time results, replace it with a StreamDiffusion / TensorRT inference server that implements this small WebSocket protocol.
+The optional backend is a proof of concept, **not StreamDiffusion**. It now uses a locked/repeatable diffusion seed plus adjustable output temporal blending to reduce frame-to-frame re-interpretation while keeping the current Three.js frame as the actual img2img input. The tuning controls are sent with every WebSocket frame, so strength, steps, stability, motion response and seed can be changed live. For sustained high-frame-rate results, a StreamDiffusion / TensorRT inference server would still be the next optimization step.
 
 ## Deployment
 
