@@ -126,6 +126,14 @@
           <input id="motion-response" type="range" min="0" max="200" value="100">
         </div>
 
+        <div class="control-block feedback-control">
+          <label for="feedback-strength">AI TEXTURE FEEDBACK <strong id="feedback-strength-label">70%</strong></label>
+          <input id="feedback-strength" type="range" min="0" max="100" value="70">
+          <label class="check" title="Project the most recent SDXL output onto the sphere and fragments. The next SDXL frame will include this texture.">
+            <input id="feedback-loop" type="checkbox" checked> FEEDBACK ON
+          </label>
+        </div>
+
         <div class="control-block seed-block">
           <label for="diffusion-seed">SEED</label>
           <div class="input-row">
