@@ -236,8 +236,7 @@ function syncInferenceResolution() {
   remoteCapture.width = remoteCapture.height = resolution;
   output.width = output.height = resolution;
   feedbackTexture.needsUpdate = true;
-  feedbackReady = false;
-  pendingProjection = null;
+  resetFeedbackProjection();
   updateFeedbackStrength();
   $('resolution-label').textContent = resolution + '²';
   // New resolution must not be compared with the old downsampled source.
@@ -399,6 +398,19 @@ function applyFeedbackProjection(snapshot) {
 
     uvAttr.needsUpdate=true;
     maskAttr.needsUpdate=true;
+  }
+}
+
+function resetFeedbackProjection() {
+  feedbackReady = false;
+  pendingProjection = null;
+  feedbackUniforms.aiFeedbackStrength.value = 0;
+  for (const piece of pieces) {
+    const mask = piece.mesh.geometry.getAttribute('aiVisibility');
+    if (mask) {
+      mask.array.fill(0);
+      mask.needsUpdate = true;
+    }
   }
 }
 
@@ -678,6 +690,7 @@ $('randomize-seed').addEventListener('click', () => {
 $('reset-ai-memory').addEventListener('click', () => {
   if (socket?.readyState === WebSocket.OPEN) {
     lastProbe = null;
+    resetFeedbackProjection();
     socket.send(JSON.stringify({type:'reset'}));
     setBadge('RESETTING','pending');
   } else {
@@ -729,7 +742,7 @@ function stopSocket(){
 
 function connectRemote(){
   stopSocket();
-  pendingProjection=null;
+  resetFeedbackProjection();
   lastProbe=null;
   lastProbeSignature='';
   skippedFrames=0;
@@ -772,6 +785,7 @@ function connectRemote(){
     socket.onclose=()=>{
       clearTimeout(connectTimeout);
       setBadge('OFFLINE','error');
+      pendingProjection=null;
       remotePending=false;
     };
 
@@ -793,7 +807,20 @@ function connectRemote(){
         return;
       }
 
-      if(msg.type!=='frame'||!msg.image)return;
+      if(msg.type!=='frame'||!msg.image){
+        pendingProjection=null;
+        remotePending=false;
+        return;
+      }
+
+      // Ignore an in-flight response from the resolution that was selected
+      // before the user moved the AI resolution control.
+      if (msg.settings?.resolution &&
+          msg.settings.resolution !== Number($('inference-resolution').value)) {
+        pendingProjection=null;
+        remotePending=false;
+        return;
+      }
 
       updateRemoteTelemetry(msg);
       const sentAt = lastRemoteSent;
