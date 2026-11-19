@@ -663,13 +663,51 @@ function connectRemote(){
   setModeLabel('DIFFUSION / EXTERNAL GPU');
   $('model-corner').textContent='NN_02 · SD-TURBO';
   $('truth').textContent='Real generative diffusion requires your own running GPU server. Frames are sent from this browser to the server over WebSocket.';
-  const address=$('socket-url').value.trim();
-  showOverlay('Connecting to diffusion','Requires your own running GPU server.');
+
+  let address=$('socket-url').value.trim();
+  if(!address) address='ws://127.0.0.1:8765/ws';
+  if(/^ws:\/\/127\.0\.0\.1:8765\/?$/.test(address)) address='ws://127.0.0.1:8765/ws';
+  $('socket-url').value=address;
+
+  showOverlay('Connecting to diffusion',address);
+
   try{
     socket=new WebSocket(address);
-    socket.onopen=()=>{setBadge('CONNECTED');$('ai-telemetry').hidden=false;$('overlay-title').textContent='Waiting for diffusion frame';$('overlay-sub').textContent='Sending image-to-image requests...';};
-    socket.onerror=()=>{setBadge('REMOTE ERROR','error');showOverlay('WebSocket connection failed','Start server.py on your GPU machine; use secure WSS for a public HTTPS site.',true);remotePending=false;};
-    socket.onclose=()=>{setBadge('OFFLINE','error');remotePending=false;};
+
+    const connectTimeout=setTimeout(()=>{
+      if(socket && socket.readyState===WebSocket.CONNECTING){
+        try{socket.close();}catch{}
+        setBadge('REMOTE ERROR','error');
+        showOverlay('WebSocket timed out','HTTP health works, but the WebSocket handshake did not complete. Check the Uvicorn terminal for a WebSocket request.',true);
+      }
+    },5000);
+
+    socket.onopen=()=>{
+      clearTimeout(connectTimeout);
+      setBadge('CONNECTED');
+      $('ai-telemetry').hidden=false;
+      $('overlay-title').textContent='Waiting for diffusion frame';
+      $('overlay-sub').textContent='Connected to '+address+' — sending image-to-image requests...';
+      console.info('[ReAil] WebSocket connected:', address);
+    };
+
+    socket.onerror=(event)=>{
+      clearTimeout(connectTimeout);
+      console.error('[ReAil] WebSocket error:', address, event);
+      setBadge('REMOTE ERROR','error');
+      showOverlay('WebSocket connection failed','Could not open '+address+'. The health endpoint can work even when WebSocket support is missing; install requirements and restart Uvicorn.',true);
+      remotePending=false;
+    };
+
+    socket.onclose=(event)=>{
+      clearTimeout(connectTimeout);
+      console.warn('[ReAil] WebSocket closed:', event.code, event.reason);
+      if(currentEngine==='remote'){
+        setBadge('OFFLINE','error');
+      }
+      remotePending=false;
+    };
+
     socket.onmessage=async(event)=>{
       let msg;
       try{msg=JSON.parse(event.data);}catch{return;}
@@ -686,7 +724,11 @@ function connectRemote(){
       };
       picture.src=msg.image;
     };
-  }catch(err){setBadge('REMOTE ERROR','error');showOverlay('Could not open WebSocket',String(err),true);}
+  }catch(err){
+    console.error('[ReAil] Could not construct WebSocket:',err);
+    setBadge('REMOTE ERROR','error');
+    showOverlay('Could not open WebSocket',String(err),true);
+  }
 }
 $('connect').addEventListener('click',connectRemote);
 $('engine').addEventListener('change',e=>{
