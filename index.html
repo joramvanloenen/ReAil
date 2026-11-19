@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111512">
+  <meta name="description" content="ReAil — interactive 3D apple slicing piped through real-time AI image-to-image models.">
+  <title>ReAil — Reality, re-rendered.</title>
+  <link rel="stylesheet" href="./style.css">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://huggingface.co">
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true"><span></span><span></span></div>
+        <div class="wordmark">Re<span>AI</span>l</div>
+        <div class="tagline">REALITY, RE-RENDERED</div>
+      </div>
+      <div class="top-meta"><span class="live-dot"></span> LIVE EXPERIMENT <span class="separator">/</span> BUILD 001</div>
+      <a class="github" href="https://github.com/joramvanloenen/ReAil" target="_blank" rel="noopener noreferrer">SOURCE <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main class="main">
+      <div class="introduction">
+        <div class="eyebrow">EXPERIMENT 001 <span class="accent-line"></span> IMAGE-TO-IMAGE</div>
+        <div class="intro-row">
+          <div>
+            <h1>A different kind<br>of <em>reality.</em></h1>
+            <p>Cut a digital apple. Watch a neural network reinterpret every frame. Two renderers, one continuously changing object.</p>
+          </div>
+          <div class="experiment-id">001 <span>/</span> APPLE STUDY</div>
+        </div>
+      </div>
+
+      <div class="viewer-grid">
+        <section class="viewer source-view" aria-label="Interactive 3D apple">
+          <div class="viewer-head"><div class="viewer-num">01 <span>/</span></div><div class="viewer-title">SOURCE <span>— THREE.JS</span></div><span class="pill">LIVE 3D</span></div>
+          <div class="viewport" id="scene-viewport">
+            <canvas id="scene-canvas" aria-label="Drag across the apple to slice it" role="img"></canvas>
+            <canvas id="stroke-canvas" aria-hidden="true"></canvas>
+            <div class="scene-hint" id="scene-hint"><span class="crosshair">✳</span> DRAG ACROSS APPLE TO SLICE</div>
+            <div class="viewport-corner top-left">RDR_01 <span>·</span> WEBGL</div>
+            <div class="viewport-corner bottom-left" id="mesh-count">01 MESH</div>
+            <div class="viewport-corner bottom-right" id="scene-fps">-- FPS</div>
+          </div>
+          <div class="viewer-foot"><span>GEOMETRY / REAL-TIME</span><span>DRAG TO CUT <span class="dot-divider">·</span> SCROLL TO ZOOM</span></div>
+        </section>
+
+        <section class="viewer ai-view" aria-label="AI generated output">
+          <div class="viewer-head"><div class="viewer-num">02 <span>/</span></div><div class="viewer-title">INTERPRETATION <span>— NEURAL</span></div><span class="pill" id="ai-badge">STARTING</span></div>
+          <div class="viewport output-viewport">
+            <div class="output-display"><canvas id="ai-canvas" width="96" height="96" aria-label="Neural style transfer output"></canvas></div>
+            <div class="ai-overlay" id="ai-overlay"><div class="loading-spinner"></div><b id="overlay-title">Initializing renderer</b><span id="overlay-sub">Preparing the first frame</span></div>
+            <div class="viewport-corner top-left" id="model-corner">NN_01 · BOOT</div>
+            <div class="viewport-corner bottom-left" id="output-resolution">96 × 96 OUTPUT</div>
+            <div class="viewport-corner bottom-right" id="ai-fps">-- FPS</div>
+          </div>
+          <div class="viewer-foot"><span id="ai-mode-label">NEURAL / LOCAL</span><span id="ai-latency">LATENCY —</span></div>
+        </section>
+      </div>
+
+      <section class="control-desk" aria-label="Experiment settings">
+        <div class="control-heading"><span class="eyebrow">EXPERIMENT CONTROLS</span><span class="control-note">ADJUST THE INPUT. OBSERVE THE OUTPUT.</span></div>
+        <div class="controls">
+          <div class="control-group tool-group">
+            <label>INTERACTION</label>
+            <div class="segmented" role="group" aria-label="Interaction tool">
+              <button id="tool-slice" class="seg active" type="button" aria-pressed="true">✳ &nbsp; SLICE</button>
+              <button id="tool-orbit" class="seg" type="button" aria-pressed="false">◎ &nbsp; ORBIT</button>
+            </div>
+            <div class="action-row"><button id="slice-once" class="button primary" type="button">+ MAKE A CUT</button><button id="reset" class="button secondary" type="button">↺ RESET</button></div>
+          </div>
+
+          <div class="control-group">
+            <label for="engine">AI PIPELINE</label>
+            <select id="engine" class="select"><option value="onnx">LOCAL NEURAL STYLE (ONNX)</option><option value="remote">REMOTE DIFFUSION (WS)</option><option value="preview">RAW PREVIEW · NO AI</option></select>
+            <label for="style" class="sub-label">MODEL</label>
+            <select id="style" class="select"><option value="candy">CANDY — PAINTERLY</option><option value="mosaic">MOSAIC — FACETED</option><option value="rain-princess">RAIN PRINCESS — BRUSHED</option><option value="udnie">UDNIE — ABSTRACT</option></select>
+          </div>
+
+          <div class="control-group">
+            <label for="resolution">OUTPUT RESOLUTION <strong id="resolution-label">96 × 96</strong></label>
+            <input id="resolution" type="range" min="0" max="3" step="1" value="1" list="resolution-ticks">
+            <datalist id="resolution-ticks"><option value="0"><option value="1"><option value="2"><option value="3"></datalist>
+            <div class="range-captions"><span>64 PX</span><span>224 PX</span></div>
+            <label for="rate" class="sub-label">MAX INFERENCE RATE <strong id="rate-label">15 FPS</strong></label>
+            <input id="rate" type="range" min="1" max="30" value="15">
+            <div class="range-captions"><span>1 FPS</span><span>30 FPS</span></div>
+          </div>
+
+          <div class="control-group">
+            <label for="rotation">APPLE ROTATION <strong id="rotation-label">0.28 RAD/S</strong></label>
+            <input id="rotation" type="range" min="0" max="150" value="28">
+            <label class="check-row"><input id="auto-rotate" type="checkbox" checked> CONTINUOUS ROTATION</label>
+            <label class="check-row"><input id="pixelated" type="checkbox" checked> PIXELATED UPSCALING</label>
+            <label class="check-row"><input id="show-raw" type="checkbox"> SHOW RAW BEFORE AI</label>
+          </div>
+        </div>
+        <div class="remote-settings" id="remote-settings" hidden>
+          <div class="remote-field"><label for="socket-url">DIFFUSION WEBSOCKET</label><input type="url" id="socket-url" placeholder="ws://127.0.0.1:8765" value="ws://127.0.0.1:8765"></div>
+          <div class="remote-field prompt"><label for="prompt">PROMPT</label><input id="prompt" value="A photorealistic red apple, cut open, ivory flesh, cinematic studio lighting, fine natural texture"></div>
+          <button class="button primary" id="connect" type="button">CONNECT</button>
+          <p>Requires your own GPU inference server. This static GitHub Pages site cannot host diffusion. See <a href="https://github.com/joramvanloenen/ReAil#optional-photorealistic-diffusion-server" target="_blank" rel="noopener noreferrer">server setup ↗</a>.</p>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="footer-left"><span class="footer-accent">✳</span> <b>WHAT IS ACTUALLY AI?</b> <span id="truth">Loading a real 224² feed-forward neural image-to-image model. Output may be slower than the 3D viewport.</span></div>
+        <span class="footer-right">REAIL LAB <span>·</span> 2026</span>
+      </footer>
+    </main>
+  </div>
+  <script type="module" src="./src.js"></script>
+</body>
+</html>
