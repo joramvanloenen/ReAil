@@ -25,6 +25,20 @@ The site also includes:
 
 Tuning controls for strength, steps (1–4), temporal stability, motion response, seed, and FPS are retained. The current Three.js frame remains the image-to-image input on **every** generation, and locked noise can reduce flickering.
 
+## AI texture feedback
+
+The generated SDXL-Turbo image can now be fed back onto the Three.js sphere and its sliced fragments.
+
+- **FEEDBACK ON:** enable/disable the visual loop (enabled by default).
+- **AI TEXTURE FEEDBACK:** adjust how strongly the AI image replaces the grey shaded surface (default 70%). Zero leaves the source grey and breaks the loop.
+- ReAil records the source camera and each fragment's transform **when the image is sent**, then creates screen-projected UV coordinates when that response returns. This keeps the result attached to the actual geometry as it moves rather than sliding across the screen.
+- Projection is restricted to front-facing and in-frame vertices. New fragments only receive an AI projection after a subsequent inference result.
+- An AI result is applied to the 3D mesh *before* the next inference request is allowed, so the next source frame includes the previous result.
+- **RESET AI MEMORY** also clears the projected AI texture influence, giving the loop a fresh start.
+- Feedback can increase visual drift and reinforcement. Reduce its strength or turn it off if the results spiral.
+
+The feedback shader operates only on the sphere/fragments, not on the floor or background. It uses the same output canvas as the AI preview, without a second image download or server-side changes. The existing 256/384/512 GPU inference resolution control still works.
+
 ## Run locally
 
 Start the frontend from the actual ReAil folder:
