@@ -1,4 +1,4 @@
-"""ReAil realtime SD-Turbo backend with live browser tuning.
+"""ReAil realtime SDXL-Turbo backend with live browser tuning.
 
 The current Three.js frame is always the diffusion input. Temporal coherence is
 created with a repeatable noise seed plus optional output blending. The browser
@@ -26,17 +26,18 @@ pipeline_lock = asyncio.Lock()
 inference_lock = asyncio.Lock()
 
 MAX_FRAME_BYTES = 2_000_000
-MODEL_SIZE = (256, 256)
+MODEL_SIZE = (512, 512)
 
 DEFAULT_PROMPT = (
-    "photorealistic red apple, preserve the exact silhouette, orientation, camera "
-    "position and composition of the input, realistic apple skin, ivory flesh where "
-    "cut, natural studio lighting, same apple identity between consecutive frames"
+    "photorealistic smooth matte grey sphere, preserve the exact silhouette, "
+    "orientation, camera position and composition of the input, neutral grey material, "
+    "slightly lighter solid grey interior where sliced, natural studio lighting, "
+    "same object identity between consecutive frames"
 )
 
-DEFAULT_STRENGTH = float(os.getenv("REAIL_STRENGTH", "0.34"))
-DEFAULT_STEPS = int(os.getenv("REAIL_STEPS", "4"))
-DEFAULT_STABILITY = float(os.getenv("REAIL_STABILITY", "0.35"))
+DEFAULT_STRENGTH = float(os.getenv("REAIL_STRENGTH", "0.50"))
+DEFAULT_STEPS = int(os.getenv("REAIL_STEPS", "2"))
+DEFAULT_STABILITY = float(os.getenv("REAIL_STABILITY", "0.42"))
 DEFAULT_MOTION_RESPONSE = float(os.getenv("REAIL_MOTION_RESPONSE", "1.0"))
 DEFAULT_SEED = int(os.getenv("REAIL_SEED", "1337"))
 GUIDANCE_SCALE = float(os.getenv("REAIL_GUIDANCE", "0.0"))
@@ -72,7 +73,7 @@ def normalize_settings(raw):
     )
 
     # Diffusers img2img must get at least one actual denoising timestep.
-    minimum_strength = min(1.0, (1.0 / steps) + 0.001)
+    minimum_strength = min(1.0, 1.0 / steps)
     strength = clamp(requested_strength, minimum_strength, 1.0)
 
     stability = clamp(
@@ -115,11 +116,11 @@ async def get_pipeline():
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA GPU is required for the ReAil diffusion backend.")
 
-        model_name = os.getenv("REAIL_MODEL", "stabilityai/sd-turbo")
+        model_name = os.getenv("REAIL_MODEL", "stabilityai/sdxl-turbo")
 
         print()
         print("=" * 54)
-        print("ReAil realtime diffusion")
+        print("ReAil realtime SDXL-Turbo diffusion")
         print("GPU:  ", torch.cuda.get_device_name(0))
         print("Model:", model_name)
         print("=" * 54)
@@ -244,7 +245,7 @@ def temporal_filter(previous_result, current_result, scene_change, settings):
 async def health():
     return {
         "status": "ok",
-        "model": os.getenv("REAIL_MODEL", "stabilityai/sd-turbo"),
+        "model": os.getenv("REAIL_MODEL", "stabilityai/sdxl-turbo"),
         "resolution": MODEL_SIZE,
         "defaults": {
             "strength": DEFAULT_STRENGTH,
