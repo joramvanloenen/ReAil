@@ -729,7 +729,7 @@ function slice(normalWorld, pointWorld) {
     cutCount++;
     $('mesh-count').textContent=String(pieces.length).padStart(2,'0')+' FRAGMENTS';
     if(!firstInteraction){firstInteraction=true;$('scene-hint').classList.add('hidden');}
-  }else flashMessage('DRAW A STROKE THROUGH THE SPHERE');
+  }else flashMessage('DRAW A STROKE THROUGH THE OBJECT');
   return sliced>0;
 }
 let noticeTimeout=null;
@@ -738,7 +738,7 @@ function flashMessage(text){
   hint.textContent=text;
   hint.classList.remove('hidden');
   clearTimeout(noticeTimeout);
-  noticeTimeout=setTimeout(()=>{hint.classList.add('hidden');hint.innerHTML='<span class="crosshair">✳</span> DRAG ACROSS SPHERE TO SLICE';},1600);
+  noticeTimeout=setTimeout(updateSourceHint,1600);
 }
 function autoSlice(){
   const angle=cutCount*Math.PI*.27;
@@ -748,6 +748,10 @@ function autoSlice(){
   slice(normal,point);
 }
 function updatePhysics(dt){
+  if (sourceKind === 'particles') {
+    updateParticlePhysics(dt);
+    return;
+  }
   for(const piece of pieces){
     if(!piece.dynamic||piece.settled)continue;
     piece.velocity.y-=1.8*dt;
@@ -798,20 +802,65 @@ function strokeStartEnd(start,end){
     gestureCtx.beginPath();gestureCtx.arc(p.x-r.left,p.y-r.top,3,0,Math.PI*2);gestureCtx.fill();
   }
 }
-let dragStart=null;
-sceneCanvas.addEventListener('pointerdown',e=>{
-  if(mode!=='slice'||e.button!==0)return;
+let dragStart = null;
+sceneCanvas.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+
+  if (mode === 'edit' && sourceKind === 'blob') {
+    normalizedScreen(e.clientX, e.clientY);
+    raycaster.setFromCamera(pointer, camera);
+    const hits=raycaster.intersectObjects(blobHandleGroup.children, false);
+    if (!hits.length) return;
+    e.preventDefault();
+    sceneCanvas.setPointerCapture(e.pointerId);
+    const handle=hits[0].object;
+    selectedBlobIndex=handle.userData.blobIndex;
+    refreshBlobHandles();
+    const worldPoint=root.localToWorld(blobNodes[selectedBlobIndex].position.clone());
+    const planeNormal=camera.getWorldDirection(new THREE.Vector3());
+    blobHandleDrag = {
+      pointerId:e.pointerId,
+      plane:new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, worldPoint)
+    };
+    return;
+  }
+
+  if(mode !== 'slice') return;
   e.preventDefault();
   sceneCanvas.setPointerCapture(e.pointerId);
   dragStart={x:e.clientX,y:e.clientY};
 });
-sceneCanvas.addEventListener('pointermove',e=>{
-  if(!dragStart)return;
-  strokeStartEnd(dragStart,{x:e.clientX,y:e.clientY});
+
+sceneCanvas.addEventListener('pointermove', e => {
+  if (blobHandleDrag && e.pointerId === blobHandleDrag.pointerId) {
+    normalizedScreen(e.clientX,e.clientY);
+    raycaster.setFromCamera(pointer,camera);
+    const target=new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(blobHandleDrag.plane,target)) {
+      const local=root.worldToLocal(target);
+      local.clampScalar(-1.02,1.02);
+      blobNodes[selectedBlobIndex].position.copy(local);
+      const handle=blobHandleGroup.children[selectedBlobIndex];
+      if(handle) handle.position.copy(local);
+      if(performance.now()-lastBlobRebuildAt>85){
+        lastBlobRebuildAt=performance.now();
+        rebuildBlobMesh();
+      }
+    }
+    return;
+  }
+  if(dragStart) strokeStartEnd(dragStart,{x:e.clientX,y:e.clientY});
 });
+
 function finishStroke(e){
-  if(!dragStart)return;
-  const start=dragStart;dragStart=null;
+  if(blobHandleDrag){
+    blobHandleDrag=null;
+    rebuildBlobMesh();
+    return;
+  }
+  if(!dragStart || mode !== 'slice') return;
+  const start=dragStart;
+  dragStart=null;
   strokeStartEnd(null,null);
   const dx=e.clientX-start.x,dy=e.clientY-start.y;
   if(Math.hypot(dx,dy)<25)return;
@@ -826,27 +875,78 @@ function finishStroke(e){
   slice(normal,through);
 }
 sceneCanvas.addEventListener('pointerup',finishStroke);
-sceneCanvas.addEventListener('pointercancel',()=>{dragStart=null;strokeStartEnd(null,null);});
+sceneCanvas.addEventListener('pointercancel',()=>{
+  const wasEditing=Boolean(blobHandleDrag);
+  blobHandleDrag=null;
+  dragStart=null;
+  strokeStartEnd(null,null);
+  if(wasEditing)rebuildBlobMesh();
+});
 
-function setTool(which){
+function setTool(which) {
+  if (which === 'edit' && sourceKind !== 'blob') return;
+  if (which === 'slice' && sourceKind === 'particles') return;
   mode=which;
   controls.enabled=which==='orbit';
-  sceneCanvas.style.cursor=which==='orbit'?'grab':'crosshair';
-  for(const t of ['slice','orbit']){
+  rotating=$('auto-rotate').checked && which!=='edit';
+  sceneCanvas.style.cursor=which==='orbit'?'grab':which==='edit'?'move':'crosshair';
+  for (const t of ['slice','edit','orbit']) {
     $('tool-'+t).classList.toggle('active',t===which);
     $('tool-'+t).setAttribute('aria-pressed',String(t===which));
   }
-  $('scene-hint').classList.toggle('hidden',which==='orbit');
-  if(which==='slice')$('scene-hint').innerHTML='<span class="crosshair">✳</span> DRAG ACROSS SPHERE TO SLICE';
+  blobHandleGroup.visible=sourceKind==='blob' && which==='edit';
+  updateSourceHint();
 }
 $('tool-slice').addEventListener('click',()=>setTool('slice'));
+$('tool-edit').addEventListener('click',()=>setTool('edit'));
 $('tool-orbit').addEventListener('click',()=>setTool('orbit'));
-$('reset').addEventListener('click',resetSphere);
+$('reset').addEventListener('click',resetCurrentShape);
+$('source-shape').addEventListener('change',e=>selectSourceShape(e.target.value));
+
+$('blob-add').addEventListener('click',()=>{
+  if(sourceKind!=='blob'||blobNodes.length>=8)return;
+  const anchor=blobNodes[selectedBlobIndex] || blobNodes[0];
+  const next=anchor.position.clone().add(new THREE.Vector3(0.34,0.15,0.03));
+  next.clampScalar(-1.05,1.05);
+  blobNodes.push({position:next,radius:0.55});
+  selectedBlobIndex=blobNodes.length-1;
+  rebuildBlobMesh();
+  refreshBlobHandles();
+});
+$('blob-remove').addEventListener('click',()=>{
+  if(sourceKind!=='blob'||blobNodes.length<=1)return;
+  blobNodes.splice(selectedBlobIndex,1);
+  selectedBlobIndex=Math.min(selectedBlobIndex,blobNodes.length-1);
+  rebuildBlobMesh();
+  refreshBlobHandles();
+});
+$('blob-radius').addEventListener('input',e=>{
+  if(sourceKind!=='blob')return;
+  const node=blobNodes[selectedBlobIndex];
+  if(!node)return;
+  node.radius=Number(e.target.value)/100;
+  $('blob-radius-label').textContent=node.radius.toFixed(2);
+  if(performance.now()-lastBlobRebuildAt>85){
+    lastBlobRebuildAt=performance.now();
+    rebuildBlobMesh();
+  }
+});
+$('blob-radius').addEventListener('change',rebuildBlobMesh);
+
+function updateParticleLabels(){
+  $('particle-rate-label').textContent=(Number($('particle-rate').value)/100).toFixed(1);
+  $('particle-attraction-label').textContent=(Number($('particle-attraction').value)/100).toFixed(2);
+  $('particle-separation-label').textContent=(Number($('particle-separation').value)/100).toFixed(2);
+}
+for(const id of ['particle-rate','particle-attraction','particle-separation']){
+  $(id).addEventListener('input',updateParticleLabels);
+}
+updateParticleLabels();
 $('rotation').addEventListener('input',e=>{
   rotSpeed=Number(e.target.value)/100;
   $('rotation-label').textContent=rotSpeed.toFixed(2);
 });
-$('auto-rotate').addEventListener('change',e=>rotating=e.target.checked);
+$('auto-rotate').addEventListener('change',e=>rotating=e.target.checked && mode!=='edit');
 $('rate').addEventListener('input',e=>{
   maxRate=Number(e.target.value);
   $('rate-label').textContent=maxRate+' FPS';
@@ -1093,7 +1193,24 @@ function animate(time) {
       try{
         const frameId=++sequence;
         const snapshot=snapshotFeedbackProjection();
-        remoteCaptureCtx.drawImage(sceneCanvas,0,0,remoteCapture.width,remoteCapture.height);
+
+        // Blob edit handles are controls, not part of the AI source image.
+        const handlesVisible=blobHandleGroup.visible;
+        if(handlesVisible){
+          blobHandleGroup.visible=false;
+          renderer.render(scene,camera);
+        }
+        try {
+          remoteCaptureCtx.drawImage(
+            sceneCanvas,0,0,remoteCapture.width,remoteCapture.height
+          );
+        } finally {
+          if(handlesVisible){
+            blobHandleGroup.visible=true;
+            renderer.render(scene,camera);
+          }
+        }
+
         pendingProjection={frameId,snapshot};
         socket.send(JSON.stringify({
           type:'frame',
@@ -1115,7 +1232,7 @@ restoreRemoteTuning();
 enforceValidStrengthForSteps();
 syncInferenceResolution();
 updateFeedbackStrength();
-resetSphere();
+selectSourceShape('sphere');
 resize();
 setBadge('OFFLINE');
 setTimeout(connectRemote,250);
