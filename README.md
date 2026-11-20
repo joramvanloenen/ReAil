@@ -56,6 +56,69 @@ The generated SDXL-Turbo image can now be fed back onto the Three.js sphere and 
 
 The feedback shader operates only on the sphere/fragments, not on the floor or background. It uses the same output canvas as the AI preview, without a second image download or server-side changes. The existing 256/384/512 GPU inference resolution control still works.
 
+## Geometry-aware closed-loop feedback
+
+ReAil now has an adaptive **closed-loop feedback controller**, inspired by the
+geometry-guided generation and recursive feedback research discussed in the chat.
+It adds no second AI model and does not change the CUDA server.
+
+**Feedback signal:**
+
+1. The current Three.js frame is captured and sent to SDXL-Turbo.
+2. A separate tiny **96×96 geometry depth/coverage pass** records which fragments
+   are visible at the exact source camera pose. Floor, ring and sculpt handles
+   are excluded.
+3. The returned AI image is compared with that silhouette. A lightweight sensor
+   estimates how much generated material spills outside the shape or disappears
+   from within it. **This is a coarse RGB silhouette signal, not a semantic model.**
+4. A bounded, smoothed PI(D)-style controller adjusts how much AI texture returns
+   to the Three.js model. An increase in measured drift reduces the gain.
+5. Per-vertex projection confidence combines front-facing normals, depth
+   consistency, silhouette proximity and motion. Hidden or uncertain surfaces
+   reject most of the previous image.
+6. Appearance memory blends a fraction of the captured current scene (which
+   already contains geometry-reprojected AI details) into the new feedback
+   texture, instead of blending two unaligned previous screen images.
+7. A seeded, **object-space variation pattern** enters the outgoing Three.js
+   render and consequently the next SDXL input. The pattern moves with each mesh,
+   including individual particles and sliced pieces. This is **not latent noise
+   warping** inside the diffusion sampler.
+
+The generated AI output panel remains the unmodified AI image. Only the
+geometry's **input-feedback texture** is blended and corrected.
+
+### Controls
+
+| Control | Effect |
+|---|---|
+| Behavior | Presets: Stable / Balanced / Mutate; changing sliders selects Custom |
+| Surface adhesion | Keeps generated details attached when the 3D surface moves |
+| Mutation | Introduces object-stable variation and permits more visual drift |
+| Geometry lock | Rejects uncertain silhouettes and occluded regions more strongly |
+| Appearance memory | Preserves previous reprojected appearance in the next texture |
+| Auto correction | Uses measured silhouette drift to adjust feedback gain |
+| AI Texture Feedback | Existing overall feedback amount and ON/OFF toggle |
+
+Live measurements show **DRIFT** (estimated silhouette deviation),
+**GAIN** (actual adaptive gain) and **VISIBLE** (source geometry coverage in the
+depth sensor). These are diagnostics, not guarantees of identity accuracy.
+
+If the browser cannot read back the depth render target, ReAil falls back to the
+existing front-facing projection. Turning feedback off also skips the extra depth
+readback. No change to the Python server or additional CUDA inference is required.
+
+### Regression tests
+
+Requires Node.js:
+
+```powershell
+node test-feedback.mjs
+```
+
+This tests depth visibility, silhouette error detection and gain reduction.
+The actual shader, WebGL depth pass and live GPU pipeline still require a browser
+and GPU for end-to-end verification.
+
 ## Run locally
 
 Start the frontend from the actual ReAil folder:
