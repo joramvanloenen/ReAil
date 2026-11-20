@@ -18,7 +18,8 @@ export function unpackDepth(pixels, offset) {
 }
 
 export function depthConfidence(pixels, size, u, v, ndcZ) {
-  if (!pixels || u < 0 || u > 1 || v < 0 || v > 1 || ndcZ < -1 || ndcZ > 1) return 0;
+  if (!pixels) return 1; // Graceful fallback if the depth capture is unsupported.
+  if (u < 0 || u > 1 || v < 0 || v > 1 || ndcZ < -1 || ndcZ > 1) return 0;
   const x = Math.min(size - 1, Math.max(0, Math.floor(u * size)));
   const y = Math.min(size - 1, Math.max(0, Math.floor(v * size)));
   const expectedDepth = ndcZ * 0.5 + 0.5;
