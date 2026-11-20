@@ -177,6 +177,54 @@
           <button id="reset-ai-memory" class="button" type="button">RESET AI MEMORY</button>
         </div>
       </section>
+
+      <section class="feedback-panel" aria-label="Closed loop feedback controller">
+        <div class="feedback-heading">
+          <div>
+            <span class="feedback-kicker">CLOSED-LOOP FEEDBACK</span>
+            <span class="feedback-subtitle">GEOMETRY-AWARE · ADAPTIVE · OBJECT-STABLE VARIATION</span>
+          </div>
+          <div class="feedback-status">
+            <span>DRIFT <strong id="feedback-drift">—</strong></span>
+            <span>GAIN <strong id="feedback-gain">1.00×</strong></span>
+            <span>VISIBLE <strong id="feedback-coverage">—</strong></span>
+          </div>
+        </div>
+        <div class="feedback-grid">
+          <div class="feedback-field">
+            <label for="feedback-preset">BEHAVIOR</label>
+            <select id="feedback-preset">
+              <option value="stable">STABLE</option>
+              <option value="balanced" selected>BALANCED</option>
+              <option value="mutate">MUTATE</option>
+              <option value="custom">CUSTOM</option>
+            </select>
+            <label class="check" title="Measure geometry drift and adjust recursive feedback strength automatically.">
+              <input id="feedback-adaptive" type="checkbox" checked> AUTO CORRECTION
+            </label>
+          </div>
+          <div class="feedback-field">
+            <label for="feedback-adhesion">SURFACE ADHESION <strong id="feedback-adhesion-label">80%</strong></label>
+            <input id="feedback-adhesion" type="range" min="0" max="100" value="80" step="5">
+            <span class="feedback-description">Retain detail on moving 3D surfaces</span>
+          </div>
+          <div class="feedback-field">
+            <label for="feedback-mutation">MUTATION <strong id="feedback-mutation-label">35%</strong></label>
+            <input id="feedback-mutation" type="range" min="0" max="100" value="35" step="5">
+            <span class="feedback-description">Object-attached variation in the AI input</span>
+          </div>
+          <div class="feedback-field">
+            <label for="feedback-geometry-lock">GEOMETRY LOCK <strong id="feedback-geometry-lock-label">85%</strong></label>
+            <input id="feedback-geometry-lock" type="range" min="0" max="100" value="85" step="5">
+            <span class="feedback-description">Protect silhouettes and occluded surfaces</span>
+          </div>
+          <div class="feedback-field">
+            <label for="feedback-memory">APPEARANCE MEMORY <strong id="feedback-memory-label">65%</strong></label>
+            <input id="feedback-memory" type="range" min="0" max="100" value="65" step="5">
+            <span class="feedback-description">Preserve detail from the previous projected view</span>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
   <script type="module" src="./src.js"></script>
