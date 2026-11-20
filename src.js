@@ -1412,11 +1412,17 @@ function connectRemote(){
           remotePending=false;
           return;
         }
-        // Finish applying the AI result BEFORE allowing the next request:
-        // the next source render must already contain this feedback texture.
+        // Measure output drift against the captured THREE.JS silhouette.
+        // Preserve geometry-aligned appearance before the next request is sent.
         drawOutput(picture);
-        applyFeedbackProjection(projection);
+        measureFeedbackFrame(picture, pending.depthPixels);
+        composeProjectedAppearance(picture);
+        applyFeedbackProjection(projection, pending.depthPixels);
         feedbackReady=true;
+        feedbackUniforms.aiNoisePhase.value = (
+          feedbackUniforms.aiNoisePhase.value +
+          (Number($('feedback-mutation').value) / 100) * 0.09
+        ) % (Math.PI*2);
         updateFeedbackStrength();
         noteAIFrame(performance.now()-sentAt);
         pendingProjection=null;
@@ -1528,7 +1534,10 @@ function animate(time) {
           }
         }
 
-        pendingProjection={frameId,snapshot,revision:sourceRevision};
+        // Offscreen RGB16 depth/coverage capture uses the same camera pose
+        // and geometry as the source frame, including moving particles.
+        const depthPixels = captureGeometryDepth();
+        pendingProjection={frameId,snapshot,depthPixels,revision:sourceRevision};
         socket.send(JSON.stringify({
           type:'frame',
           image:remoteCapture.toDataURL('image/jpeg',.80),
