@@ -1407,7 +1407,9 @@ function connectRemote(){
       const connection = socket;
       const picture=new Image();
       picture.onload=()=>{
-        if (socket!==connection || sourceRevision!==expectedRevision) {
+        if (socket!==connection || sourceRevision!==expectedRevision ||
+            pendingProjection!==pending ||
+            msg.settings?.resolution !== Number($('inference-resolution').value)) {
           pendingProjection=null;
           remotePending=false;
           return;
