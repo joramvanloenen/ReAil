@@ -392,6 +392,53 @@ function makeGeometry(faces) {
   g.computeBoundingSphere();
   return g;
 }
+function captureGeometryDepth() {
+  if (!geometryCaptureSupported) return null;
+
+  const previousTarget = renderer.getRenderTarget();
+  const previousOverride = scene.overrideMaterial;
+  const previousBackground = scene.background;
+  const previousClearColor = renderer.getClearColor(new THREE.Color());
+  const previousClearAlpha = renderer.getClearAlpha();
+  const wasFloorVisible = floor.visible;
+  const wasRingVisible = ring.visible;
+  const wereHandlesVisible = blobHandleGroup.visible;
+
+  const pixels = new Uint8Array(GEOMETRY_SENSOR_SIZE * GEOMETRY_SENSOR_SIZE * 4);
+
+  try {
+    floor.visible = false;
+    ring.visible = false;
+    blobHandleGroup.visible = false;
+    scene.overrideMaterial = geometryDepthMaterial;
+    scene.background = new THREE.Color(0x000000);
+    renderer.setRenderTarget(geometryDepthTarget);
+    renderer.setClearColor(0x000000, 1);
+    renderer.clear(true, true, true);
+    renderer.render(scene, camera);
+    renderer.readRenderTargetPixels(
+      geometryDepthTarget, 0, 0,
+      GEOMETRY_SENSOR_SIZE, GEOMETRY_SENSOR_SIZE, pixels
+    );
+    return pixels;
+  } catch (error) {
+    geometryCaptureSupported = false;
+    if (!geometryReadbackWarned) {
+      console.warn('[ReAil] Depth sensor unavailable, using normal-only projection:', error);
+      geometryReadbackWarned = true;
+    }
+    return null;
+  } finally {
+    floor.visible = wasFloorVisible;
+    ring.visible = wasRingVisible;
+    blobHandleGroup.visible = wereHandlesVisible;
+    scene.background = previousBackground;
+    scene.overrideMaterial = previousOverride;
+    renderer.setRenderTarget(previousTarget);
+    renderer.setClearColor(previousClearColor, previousClearAlpha);
+  }
+}
+
 function snapshotFeedbackProjection() {
   scene.updateMatrixWorld(true);
   camera.updateMatrixWorld(true);
@@ -406,15 +453,23 @@ function snapshotFeedbackProjection() {
   return {viewProjection, cameraPosition, pieceMatrices};
 }
 
-function applyFeedbackProjection(snapshot) {
+function applyFeedbackProjection(snapshot, depthPixels) {
   if (!snapshot) return;
 
   const worldPos = new THREE.Vector3();
   const normalMatrix = new THREE.Matrix3();
+  const controls = getFeedbackControls();
+  const adhesion = controls.adhesion / 100;
+  const geometryLock = controls.geometryLock / 100;
+  const currentProjection = new THREE.Matrix4();
+
+  scene.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  currentProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
 
   for (const piece of pieces) {
     const modelMatrix = snapshot.pieceMatrices.get(piece.mesh.uuid);
-    if (!modelMatrix) continue; // Newly cut fragment: wait for next AI result.
+    if (!modelMatrix) continue; // Newly emitted or split pieces wait for the next AI result.
 
     const geometry = piece.mesh.geometry;
     const positions = geometry.getAttribute('position');
@@ -432,6 +487,10 @@ function applyFeedbackProjection(snapshot) {
     const nm = normalMatrix.elements;
     const cameraPos = snapshot.cameraPosition;
 
+    const currentClip = new THREE.Matrix4().multiplyMatrices(
+      currentProjection, piece.mesh.matrixWorld
+    ).elements;
+
     for (let i=0; i<positions.count; i++) {
       const j=i*3, k=i*2;
       const x=positions.array[j], y=positions.array[j+1], z=positions.array[j+2];
@@ -444,10 +503,12 @@ function applyFeedbackProjection(snapshot) {
 
       const px=(clip[0]*x+clip[4]*y+clip[8]*z+clip[12])/w;
       const py=(clip[1]*x+clip[5]*y+clip[9]*z+clip[13])/w;
-      uv[k]=px*0.5+0.5;
-      uv[k+1]=py*0.5+0.5;
+      const pz=(clip[2]*x+clip[6]*y+clip[10]*z+clip[14])/w;
+      const u=px*0.5+0.5;
+      const v=py*0.5+0.5;
+      uv[k]=u;
+      uv[k+1]=v;
 
-      // Keep feedback on the source-visible surface, not the far hemisphere.
       worldPos.set(
         world[0]*x+world[4]*y+world[8]*z+world[12],
         world[1]*x+world[5]*y+world[9]*z+world[13],
@@ -462,7 +523,30 @@ function applyFeedbackProjection(snapshot) {
       const tz=cameraPos.z-worldPos.z;
       const facing=(nnx*tx+nny*ty+nnz*tz) /
         Math.max(0.000001,Math.hypot(nnx,nny,nnz)*Math.hypot(tx,ty,tz));
-      mask[i]=THREE.MathUtils.clamp(facing*5,0,1);
+      if (facing <= 0 || u<0 || u>1 || v<0 || v>1) {
+        mask[i]=0;
+        continue;
+      }
+
+      // Depth map is captured from the *source geometry* at send time.
+      // Do not project imagery onto occluded rear surfaces or silhouettes.
+      const depthWeight=depthConfidence(
+        depthPixels, GEOMETRY_SENSOR_SIZE, u, v, pz
+      );
+
+      const newW=currentClip[3]*x+currentClip[7]*y+currentClip[11]*z+currentClip[15];
+      const newU=newW>0 ? (currentClip[0]*x+currentClip[4]*y+currentClip[8]*z+currentClip[12])/newW*0.5+0.5 : u;
+      const newV=newW>0 ? (currentClip[1]*x+currentClip[5]*y+currentClip[9]*z+currentClip[13])/newW*0.5+0.5 : v;
+      const movement=Math.hypot(newU-u,newV-v);
+      const motionConfidence=Math.exp(-movement*(1-adhesion)*5.0);
+
+      // Geometry lock protects boundary/occlusion uncertainty; adhesion
+      // preserves the warped texture as the same surface moves in 3D.
+      const spatialConfidence=Math.pow(
+        depthWeight, 0.6 + geometryLock * 1.65
+      );
+      mask[i]=THREE.MathUtils.clamp(facing*4.5,0,1) *
+        spatialConfidence * motionConfidence;
     }
 
     uvAttr.needsUpdate=true;
