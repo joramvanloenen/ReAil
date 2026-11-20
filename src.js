@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
+  FEEDBACK_PRESETS,
+  ClosedLoopController,
+  depthConfidence
+} from './feedback-controller.js';
+import {
   makeSphereFaces,
   makeHeadFaces,
   initialBlobNodes,
@@ -18,7 +23,11 @@ const gestureCtx = strokeCanvas.getContext('2d');
 
 // The AI image is also a GPU texture. The UVs are projected from the exact
 // camera pose used for the source frame and then remain attached to each mesh.
-const feedbackTexture = new THREE.CanvasTexture(output);
+const feedbackCanvas = document.createElement('canvas');
+feedbackCanvas.width = output.width;
+feedbackCanvas.height = output.height;
+const feedbackCtx = feedbackCanvas.getContext('2d', {alpha:false});
+const feedbackTexture = new THREE.CanvasTexture(feedbackCanvas);
 feedbackTexture.colorSpace = THREE.SRGBColorSpace;
 feedbackTexture.wrapS = THREE.ClampToEdgeWrapping;
 feedbackTexture.wrapT = THREE.ClampToEdgeWrapping;
@@ -27,8 +36,16 @@ feedbackTexture.magFilter = THREE.LinearFilter;
 feedbackTexture.generateMipmaps = false;
 const feedbackUniforms = {
   aiFeedbackTexture: {value: feedbackTexture},
-  aiFeedbackStrength: {value: 0}
+  aiFeedbackStrength: {value: 0},
+  aiMutation: {value: 0},
+  aiNoisePhase: {value: 0}
 };
+const closedLoop = new ClosedLoopController();
+const GEOMETRY_SENSOR_SIZE = 96;
+const aiSensorCanvas = document.createElement('canvas');
+aiSensorCanvas.width = aiSensorCanvas.height = GEOMETRY_SENSOR_SIZE;
+const aiSensorCtx = aiSensorCanvas.getContext('2d', {willReadFrequently:true});
+let geometryCaptureSupported = true;
 let feedbackReady = false;
 let pendingProjection = null;
 const remoteCapture = document.createElement('canvas');
@@ -83,6 +100,34 @@ ring.rotation.x = -Math.PI / 2;
 ring.position.y = -1.617;
 scene.add(ring);
 
+// A small offscreen z-buffer pass captures visibility of the actual 3D pieces
+// at the camera pose that generated the SDXL input frame. The depth is encoded
+// in RG16; B is a coverage flag. No extra neural model is needed.
+const geometryDepthTarget = new THREE.WebGLRenderTarget(
+  GEOMETRY_SENSOR_SIZE, GEOMETRY_SENSOR_SIZE,
+  {
+    minFilter:THREE.NearestFilter, magFilter:THREE.NearestFilter,
+    format:THREE.RGBAFormat, type:THREE.UnsignedByteType,
+    depthBuffer:true, stencilBuffer:false
+  }
+);
+const geometryDepthMaterial = new THREE.ShaderMaterial({
+  side:THREE.DoubleSide,
+  depthTest:true, depthWrite:true,
+  vertexShader:`
+    void main() {
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader:`
+    void main() {
+      float d = clamp(gl_FragCoord.z, 0.0, 1.0);
+      float high = floor(d * 255.0);
+      float low = floor(fract(d * 255.0) * 255.0);
+      gl_FragColor = vec4(high / 255.0, low / 255.0, 1.0, 1.0);
+    }
+  `
+});
 const root = new THREE.Group();
 scene.add(root);
 const blobHandleGroup = new THREE.Group();
@@ -106,22 +151,31 @@ for (const mat of materials) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.aiFeedbackTexture = feedbackUniforms.aiFeedbackTexture;
     shader.uniforms.aiFeedbackStrength = feedbackUniforms.aiFeedbackStrength;
+    shader.uniforms.aiMutation = feedbackUniforms.aiMutation;
+    shader.uniforms.aiNoisePhase = feedbackUniforms.aiNoisePhase;
     shader.vertexShader = `
       attribute vec2 aiUv;
       attribute float aiVisibility;
+      attribute float aiSeed;
       varying vec2 vAiUv;
       varying float vAiVisibility;
+      varying vec3 vAiLocalPosition;
+      varying float vAiSeed;
     ` + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
-      '#include <begin_vertex>\n vAiUv = aiUv; vAiVisibility = aiVisibility;'
+      '#include <begin_vertex>\n vAiUv = aiUv; vAiVisibility = aiVisibility; vAiLocalPosition = position; vAiSeed = aiSeed;'
     );
 
     shader.fragmentShader = `
       uniform sampler2D aiFeedbackTexture;
       uniform float aiFeedbackStrength;
+      uniform float aiMutation;
+      uniform float aiNoisePhase;
       varying vec2 vAiUv;
       varying float vAiVisibility;
+      varying vec3 vAiLocalPosition;
+      varying float vAiSeed;
     ` + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <opaque_fragment>',
@@ -130,6 +184,16 @@ for (const mat of materials) {
           vAiUv.x >= 0.0 && vAiUv.x <= 1.0 &&
           vAiUv.y >= 0.0 && vAiUv.y <= 1.0) {
         vec3 aiColor = texture2D(aiFeedbackTexture, vAiUv).rgb;
+        // Object-anchored, correlated RGB perturbation. It follows the mesh
+        // during motion and re-enters SDXL through the next captured frame.
+        // This is intentionally not claimed to be diffusion latent warping.
+        vec3 voxel = vAiLocalPosition * 14.0 + vec3(
+          vAiSeed * 6.21, vAiSeed * 11.43, vAiSeed * 9.17
+        );
+        float granule = fract(sin(dot(floor(voxel), vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+        float variation = 0.5 * (granule - 0.5) +
+          0.5 * sin(dot(voxel, vec3(1.73, 2.91, 2.23)) + aiNoisePhase);
+        aiColor = clamp(aiColor + vec3(variation * aiMutation * 0.12), 0.0, 1.0);
         outgoingLight = mix(outgoingLight, aiColor,
           clamp(aiFeedbackStrength * vAiVisibility, 0.0, 1.0));
       }
@@ -137,7 +201,7 @@ for (const mat of materials) {
       `
     );
   };
-  mat.customProgramCacheKey = () => 'reail-screen-projection-v1';
+  mat.customProgramCacheKey = () => 'reail-adaptive-feedback-v2';
 }
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -184,6 +248,9 @@ let lastProbe = null;
 let lastProbeSignature = '';
 let lastSourceSentAt = 0;
 let skippedFrames = 0;
+let feedbackPreset = 'balanced';
+let feedbackSurfaceSeed = 1;
+let geometryReadbackWarned = false;
 
 const tuningIds = [
   'diffusion-strength',
@@ -314,6 +381,9 @@ function makeGeometry(faces) {
   ));
   g.setAttribute('aiVisibility',new THREE.BufferAttribute(
     new Float32Array(pos.length/3),1
+  ));
+  g.setAttribute('aiSeed', new THREE.BufferAttribute(
+    new Float32Array(pos.length/3).fill((feedbackSurfaceSeed++ % 499) / 499), 1
   ));
   g.clearGroups();
   g.addGroup(0,counts[0],0);
