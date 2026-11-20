@@ -43,9 +43,9 @@ export function depthConfidence(pixels, size, u, v, ndcZ) {
     }
   }
 
-  if (visibleNeighbors === 0 || bestDelta > 0.022) return 0;
+  if (visibleNeighbors === 0 || bestDelta > 0.0035) return 0;
   // Prefer accurately visible regions; reduce confidence at silhouette edges.
-  const depthWeight = 1 - clamp01(bestDelta / 0.024);
+  const depthWeight = 1 - clamp01(bestDelta / 0.004);
   return depthWeight * (0.60 + 0.40 * Math.min(1, visibleNeighbors / 6));
 }
 
