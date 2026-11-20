@@ -160,3 +160,53 @@ input[type=checkbox]{width:12px;height:12px;accent-color:#aaa}
 .particle-tools > label:not(.check) {margin-top:7px}
 .particle-tools > label:first-child {margin-top:0}
 .particle-tools input[type=range] {margin:5px 0 9px}
+
+/* Closed-loop controller — restrained charcoal, same density as the main controls. */
+.feedback-panel{
+  margin-top:12px;border:1px solid var(--line);background:var(--panel);
+}
+.feedback-heading{
+  min-height:46px;padding:10px 14px;display:flex;justify-content:space-between;
+  align-items:center;gap:12px;border-bottom:1px solid var(--line);
+}
+.feedback-heading>div:first-child{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.feedback-kicker{font:10px var(--mono);letter-spacing:.7px;color:#e3e3e3}
+.feedback-subtitle{font:8px var(--mono);letter-spacing:.25px;color:#6c6c6c}
+.feedback-status{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.feedback-status span{font:8px var(--mono);color:#777;white-space:nowrap}
+.feedback-status strong{font-weight:500;color:#dedede}
+.feedback-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+.feedback-field{min-width:0;padding:15px 14px;border-right:1px solid var(--line)}
+.feedback-field:last-child{border-right:0}
+.feedback-field>label:not(.check){
+  font:8px var(--mono);letter-spacing:.4px;color:#898989;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:15px;
+  margin-bottom:9px;
+}
+.feedback-field strong{color:#c8c8c8;font-weight:500}
+.feedback-field select{
+  width:100%;height:34px;padding:0 9px;background:#0b0b0b;
+  border:1px solid #303030;color:#ddd;font:9px var(--mono);
+}
+.feedback-field input[type=range]{margin:10px 0 12px}
+.feedback-field .check{font:8px var(--mono);color:#999}
+.feedback-description{display:block;color:#626262;font:8px/1.5 var(--mono)}
+@media(max-width:1050px){
+ .feedback-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .feedback-field:nth-child(3n){border-right:0}
+ .feedback-field:nth-child(n+4){border-top:1px solid var(--line)}
+}
+@media(max-width:760px){
+ .feedback-heading{align-items:flex-start;flex-direction:column}
+ .feedback-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .feedback-field:nth-child(3n){border-right:1px solid var(--line)}
+ .feedback-field:nth-child(2n){border-right:0}
+ .feedback-field:nth-child(n+3){border-top:1px solid var(--line)}
+}
+@media(max-width:460px){
+ .feedback-grid{grid-template-columns:1fr}
+ .feedback-field,.feedback-field:nth-child(2n),.feedback-field:nth-child(3n){
+    border-right:0;border-top:1px solid var(--line);
+ }
+ .feedback-field:first-child{border-top:0}
+}
