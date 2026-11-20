@@ -19,6 +19,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate JavaScript modules
+        run: |
+          node --check src.js
+          node --check shape-sources.js
+          node --check feedback-controller.js
+      - name: Test closed-loop feedback controller
+        run: node test-feedback.mjs
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload static site
