@@ -266,6 +266,84 @@ const tuningIds = [
   'feedback-strength'
 ];
 
+const FEEDBACK_SLIDER_IDS = [
+  'feedback-adhesion',
+  'feedback-mutation',
+  'feedback-geometry-lock',
+  'feedback-memory'
+];
+
+function getFeedbackControls() {
+  return {
+    adhesion: Number($('feedback-adhesion').value),
+    mutation: Number($('feedback-mutation').value),
+    geometryLock: Number($('feedback-geometry-lock').value),
+    appearanceMemory: Number($('feedback-memory').value)
+  };
+}
+
+function setFeedbackLabels() {
+  for (const id of FEEDBACK_SLIDER_IDS) {
+    $(id+'-label').textContent = $(id).value + '%';
+  }
+}
+
+function setFeedbackPreset(name) {
+  const values = FEEDBACK_PRESETS[name];
+  if (!values) return;
+  feedbackPreset = name;
+  $('feedback-preset').value = name;
+  $('feedback-adhesion').value = String(values.adhesion);
+  $('feedback-mutation').value = String(values.mutation);
+  $('feedback-geometry-lock').value = String(values.geometryLock);
+  $('feedback-memory').value = String(values.appearanceMemory);
+  setFeedbackLabels();
+  updateFeedbackStrength();
+  saveFeedbackControls();
+}
+
+function saveFeedbackControls() {
+  try {
+    localStorage.setItem('reail-closed-loop-v1', JSON.stringify({
+      preset:feedbackPreset,
+      adaptive:$('feedback-adaptive').checked,
+      ...getFeedbackControls()
+    }));
+  } catch {}
+}
+
+function restoreFeedbackControls() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('reail-closed-loop-v1') || 'null');
+    if (!saved) return;
+    const preset = FEEDBACK_PRESETS[saved.preset];
+    if (preset) feedbackPreset = saved.preset;
+    for (const [id, key] of [
+      ['feedback-adhesion', 'adhesion'],
+      ['feedback-mutation', 'mutation'],
+      ['feedback-geometry-lock', 'geometryLock'],
+      ['feedback-memory', 'appearanceMemory']
+    ]) {
+      if (Number.isFinite(saved[key])) {
+        $(id).value = String(Math.max(0, Math.min(100, Math.round(saved[key]))));
+      }
+    }
+    if (typeof saved.adaptive === 'boolean') $('feedback-adaptive').checked = saved.adaptive;
+    $('feedback-preset').value = preset ? feedbackPreset : 'custom';
+    setFeedbackLabels();
+  } catch {}
+}
+
+function updateFeedbackDiagnostics() {
+  $('feedback-drift').textContent = closedLoop.hasSample
+    ? (closedLoop.drift * 100).toFixed(1) + '%' : '—';
+  $('feedback-gain').textContent = (
+    $('feedback-adaptive').checked ? closedLoop.gain : 1
+  ).toFixed(2) + '×';
+  $('feedback-coverage').textContent = closedLoop.hasSample
+    ? (closedLoop.coverage * 100).toFixed(0) + '%' : '—';
+}
+
 function updateTuningLabels() {
   const strength = Number($('diffusion-strength').value) / 100;
   const steps = Number($('diffusion-steps').value);
@@ -336,6 +414,7 @@ function syncInferenceResolution() {
   const resolution = Number($('inference-resolution').value);
   remoteCapture.width = remoteCapture.height = resolution;
   output.width = output.height = resolution;
+  feedbackCanvas.width = feedbackCanvas.height = resolution;
   feedbackTexture.needsUpdate = true;
   resetFeedbackProjection();
   updateFeedbackStrength();
@@ -557,7 +636,13 @@ function applyFeedbackProjection(snapshot, depthPixels) {
 function resetFeedbackProjection() {
   feedbackReady = false;
   pendingProjection = null;
+  closedLoop.reset();
   feedbackUniforms.aiFeedbackStrength.value = 0;
+  feedbackUniforms.aiMutation.value = 0;
+  feedbackUniforms.aiNoisePhase.value = 0;
+  feedbackCtx.fillStyle = '#101010';
+  feedbackCtx.fillRect(0, 0, feedbackCanvas.width, feedbackCanvas.height);
+  feedbackTexture.needsUpdate = true;
   for (const piece of pieces) {
     const mask = piece.mesh.geometry.getAttribute('aiVisibility');
     if (mask) {
@@ -565,15 +650,29 @@ function resetFeedbackProjection() {
       mask.needsUpdate = true;
     }
   }
+  updateFeedbackDiagnostics();
 }
 
 function updateFeedbackStrength() {
+  const controls = getFeedbackControls();
+  const master = Number($('feedback-strength').value) / 100;
+  const adhesion = controls.adhesion / 100;
+  const geometryLock = controls.geometryLock / 100;
+  const automatic = $('feedback-adaptive').checked ? closedLoop.gain : 1;
+  // Surface adhesion determines how much of the previous AI appearance
+  // survives on moving geometry. Lock protects uncertain boundaries.
+  const effective = master * (0.30 + 0.70 * adhesion) *
+    (1 - 0.10 * geometryLock) * automatic;
+
   feedbackUniforms.aiFeedbackStrength.value =
     feedbackReady && $('feedback-loop').checked
-      ? Number($('feedback-strength').value)/100
-      : 0;
+      ? Math.max(0, Math.min(1, effective)) : 0;
+  feedbackUniforms.aiMutation.value =
+    feedbackReady && $('feedback-loop').checked
+      ? controls.mutation / 100 : 0;
   $('feedback-strength-label').textContent =
-    Math.round(Number($('feedback-strength').value))+'%';
+    Math.round(Number($('feedback-strength').value)) + '%';
+  updateFeedbackDiagnostics();
 }
 
 function addPiece(faces, offset, velocity, dynamic) {
@@ -1157,8 +1256,35 @@ function drawOutput(source){
   outputCtx.imageSmoothingEnabled=true;
   outputCtx.clearRect(0,0,output.width,output.height);
   outputCtx.drawImage(source,0,0,output.width,output.height);
-  feedbackTexture.needsUpdate = true;
   lastDisplay=source;
+}
+
+function composeProjectedAppearance(source){
+  const width = feedbackCanvas.width, height = feedbackCanvas.height;
+  feedbackCtx.globalAlpha = 1;
+  feedbackCtx.drawImage(source, 0, 0, width, height);
+  // The captured Three.js input already contains the previous AI appearance
+  // reprojected onto the current geometry. Blending it preserves identity
+  // across moving viewpoints without blending two unaligned video frames.
+  const memory = Number($('feedback-memory').value) / 100;
+  if (feedbackReady && memory > 0) {
+    feedbackCtx.globalAlpha = Math.min(0.72, memory * 0.68);
+    feedbackCtx.drawImage(remoteCapture, 0, 0, width, height);
+    feedbackCtx.globalAlpha = 1;
+  }
+  feedbackTexture.needsUpdate = true;
+}
+
+function measureFeedbackFrame(image, depthPixels) {
+  if (!depthPixels) return;
+  aiSensorCtx.drawImage(image, 0, 0, GEOMETRY_SENSOR_SIZE, GEOMETRY_SENSOR_SIZE);
+  const imageData = aiSensorCtx.getImageData(
+    0,0,GEOMETRY_SENSOR_SIZE,GEOMETRY_SENSOR_SIZE
+  );
+  closedLoop.observe(
+    imageData.data, depthPixels, GEOMETRY_SENSOR_SIZE, getFeedbackControls()
+  );
+  updateFeedbackDiagnostics();
 }
 function noteAIFrame(ms) {
   hasAIFrame=true;
@@ -1309,6 +1435,24 @@ function connectRemote(){
   }
 }
 $('connect').addEventListener('click',connectRemote);
+
+$('feedback-preset').addEventListener('change', event => {
+  const preset = event.target.value;
+  if (FEEDBACK_PRESETS[preset]) setFeedbackPreset(preset);
+});
+for (const id of FEEDBACK_SLIDER_IDS) {
+  $(id).addEventListener('input', () => {
+    feedbackPreset = 'custom';
+    $('feedback-preset').value = 'custom';
+    setFeedbackLabels();
+    updateFeedbackStrength();
+    saveFeedbackControls();
+  });
+}
+$('feedback-adaptive').addEventListener('change', () => {
+  updateFeedbackStrength();
+  saveFeedbackControls();
+});
 function animate(time) {
   requestAnimationFrame(animate);
 
@@ -1402,6 +1546,8 @@ function animate(time) {
 }
 
 restoreRemoteTuning();
+restoreFeedbackControls();
+setFeedbackLabels();
 enforceValidStrengthForSteps();
 syncInferenceResolution();
 updateFeedbackStrength();
