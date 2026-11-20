@@ -1536,7 +1536,9 @@ function animate(time) {
 
         // Offscreen RGB16 depth/coverage capture uses the same camera pose
         // and geometry as the source frame, including moving particles.
-        const depthPixels = captureGeometryDepth();
+        const depthPixels = $('feedback-loop').checked &&
+          Number($('feedback-strength').value) > 0
+            ? captureGeometryDepth() : null;
         pendingProjection={frameId,snapshot,depthPixels,revision:sourceRevision};
         socket.send(JSON.stringify({
           type:'frame',
